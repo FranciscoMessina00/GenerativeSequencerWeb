@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Web Generative Sequencer — Modal String</title>
+  <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body>
+  <header>
+    <div class="title">
+      <h1>Generative Sequencer <span class="sub">modal string · phase 1</span></h1>
+      <p class="status" id="status">audio not started</p>
+    </div>
+    <div class="transport">
+      <button id="play" class="primary">Play</button>
+      <button id="pluck">Pluck once</button>
+      <button id="reseed">Reseed</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="monitor">
+      <canvas id="ring" aria-label="Euclidean step ring"></canvas>
+      <div class="legend">
+        <span><i class="dot filled"></i> Euclid pulse</span>
+        <span><i class="dot hollow"></i> no pulse</span>
+        <span><i class="dot fired"></i> triggered</span>
+      </div>
+      <pre id="readout" aria-live="off"></pre>
+    </aside>
+    <div class="panel" id="controls"></div>
+  </main>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,240 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventBus } from '../src/core/EventBus.js';
+import { Rng } from '../src/core/rng.js';
+import { Track } from '../src/sequencer/Track.js';
+import { Scheduler } from '../src/sequencer/Scheduler.js';
+import { paramSpec } from '../src/core/paramSchema.js';
+
+/**
+ * A scheduler driven by a fake audio clock, so timing is deterministic.
+ *
+ * The real Ticker is replaced by a no-op: tests call `pump()` themselves, and a
+ * live timer would both race the fake clock and keep Node's event loop open
+ * forever after the test finished.
+ */
+const NULL_TICKER = { start() {}, stop() {}, dispose() {} };
+
+function harness({ bpm = 120, seed = 2024 } = {}) {
+  const bus = new EventBus();
+  const track = new Track(0, new Rng(seed));
+  const clock = { now: 0 };
+  const scheduler = new Scheduler({
+    bus,
+    getCurrentTime: () => clock.now,
+    tracks: [track],
+    ticker: NULL_TICKER,
+  });
+  scheduler.setParam('bpm', bpm);
+
+  const steps = [];
+  bus.on('step', (s) => steps.push(s));
+
+  // Mirrors main.js: the bus routes a param change to whichever consumer owns it.
+  bus.on('param:change', ({ key, value }) => {
+    const spec = paramSpec(key);
+    if (spec?.target === 'track') track.setParam(key, value);
+    else if (spec?.target === 'transport') scheduler.setParam(key, value);
+  });
+
+  /** Advance the clock in small slices, pumping as the ticker would. */
+  const advance = (seconds, sliceMs = 25) => {
+    const slice = sliceMs / 1000;
+    const target = clock.now + seconds;
+    while (clock.now < target) {
+      clock.now = Math.min(target, clock.now + slice);
+      scheduler.pump();
+    }
+  };
+
+  return { bus, track, scheduler, steps, clock, advance };
+}
+
+test('EventBus delivers, unsubscribes, and survives a throwing listener', () => {
+  const bus = new EventBus();
+  const seen = [];
+  const off = bus.on('x', (v) => seen.push(v));
+  bus.emit('x', 1);
+  off();
+  bus.emit('x', 2);
+  assert.deepEqual(seen, [1]);
+
+  // A broken UI listener must not be able to stop the audio one.
+  const after = [];
+  bus.on('y', () => {
+    throw new Error('boom');
+  });
+  bus.on('y', (v) => after.push(v));
+  bus.emit('y', 7);
+  assert.deepEqual(after, [7]);
+});
+
+test('one step is a 16th note at the set tempo', () => {
+  for (const bpm of [30, 120, 300]) {
+    const h = harness({ bpm });
+    assert.equal(h.scheduler.stepDuration, 60 / (bpm * 4));
+  }
+});
+
+test('steps are evenly spaced and free of drift', () => {
+  const h = harness({ bpm: 120 });
+  h.scheduler.start();
+  h.advance(20);
+
+  assert.ok(h.steps.length > 100, `only ${h.steps.length} steps`);
+  const expected = h.scheduler.stepDuration;
+  const first = h.steps[0].audioTime;
+
+  for (let i = 1; i < h.steps.length; i += 1) {
+    const gap = h.steps[i].audioTime - h.steps[i - 1].audioTime;
+    assert.ok(Math.abs(gap - expected) < 1e-9, `gap ${gap} at step ${i}`);
+    // Absolute position must stay exact, not just locally even.
+    const drift = h.steps[i].audioTime - (first + i * expected);
+    assert.ok(Math.abs(drift) < 1e-9, `drift ${drift} at step ${i}`);
+  }
+});
+
+test('scheduling always runs ahead of the audio clock', () => {
+  const h = harness();
+  h.scheduler.start();
+  const decided = [];
+  h.bus.on('step', (s) => decided.push(s.audioTime - h.clock.now));
+  h.advance(5);
+  // Every step must be decided before it is due, or the note would be late.
+  for (const lead of decided) {
+    assert.ok(lead >= 0, `step was decided ${(-lead * 1000).toFixed(1)} ms late`);
+    assert.ok(lead <= 0.11, `step decided ${lead}s early, beyond the lookahead`);
+  }
+});
+
+test('a late tick emits the missed steps rather than sliding the grid', () => {
+  const h = harness({ bpm: 120 });
+  h.scheduler.start();
+  h.advance(0.5);
+  const before = h.steps.length;
+
+  // Simulate a badly stalled timer: jump a whole second in one go.
+  h.clock.now += 1;
+  h.scheduler.pump();
+
+  const gained = h.steps.length - before;
+  // 1 s at 120 BPM is 8 sixteenth notes; all of them must appear.
+  assert.ok(gained >= 8, `only recovered ${gained} steps`);
+  const expected = h.scheduler.stepDuration;
+  for (let i = 1; i < h.steps.length; i += 1) {
+    const gap = h.steps[i].audioTime - h.steps[i - 1].audioTime;
+    assert.ok(Math.abs(gap - expected) < 1e-9, `grid slipped at step ${i}`);
+  }
+});
+
+test('a tempo change applies from the next step onward', () => {
+  const h = harness({ bpm: 120 });
+  h.scheduler.start();
+  h.advance(2);
+  const beforeCount = h.steps.length;
+
+  h.bus.emit('param:change', { trackId: 0, key: 'bpm', value: 240 });
+  h.advance(2);
+
+  const after = h.steps.slice(beforeCount + 1);
+  const expected = 60 / (240 * 4);
+  for (let i = 1; i < after.length; i += 1) {
+    const gap = after[i].audioTime - after[i - 1].audioTime;
+    assert.ok(Math.abs(gap - expected) < 1e-9, `gap ${gap}, expected ${expected}`);
+  }
+  // Twice the tempo should produce roughly twice the steps in the same time.
+  assert.ok(after.length > (beforeCount - 1) * 1.8, `${after.length} vs ${beforeCount}`);
+});
+
+test('stop preserves the playhead; the generators resume where they left off', () => {
+  const h = harness();
+  h.bus.emit('param:change', { trackId: 0, key: 'steps', value: 8 });
+  h.scheduler.start();
+  h.advance(1);
+  const lastIndex = h.steps[h.steps.length - 1].stepIndex;
+
+  h.scheduler.stop();
+  h.advance(2); // nothing should be emitted while stopped
+  assert.equal(h.steps[h.steps.length - 1].stepIndex, lastIndex);
+
+  h.scheduler.start();
+  h.advance(0.2);
+  assert.equal(h.steps[h.steps.length - 1].stepIndex !== lastIndex, true);
+  // The pattern index continued rather than restarting from 0.
+  const resumed = h.steps.filter((s) => s.audioTime > h.clock.now - 0.2);
+  assert.ok(resumed.length > 0);
+});
+
+test('untriggered steps are still emitted, so generators keep advancing', () => {
+  const h = harness();
+  // 16 steps, 1 pulse, probability 0, OR -> exactly one trigger per cycle.
+  for (const [k, v] of Object.entries({
+    steps: 16, pulses: 1, probability: 0, logicOp: 1,
+  })) {
+    h.bus.emit('param:change', { trackId: 0, key: k, value: v });
+  }
+  h.scheduler.start();
+  h.advance(4);
+
+  const fired = h.steps.filter((s) => s.triggered).length;
+  assert.ok(h.steps.length > fired * 8, 'silent steps should dominate');
+  // Every step index in the cycle must appear, in order.
+  const indices = h.steps.slice(1, 17).map((s) => s.stepIndex);
+  assert.deepEqual(indices, [...Array(16).keys()].map((i) => (indices[0] + i) % 16));
+});
+
+test('every step carries what the audio engine needs', () => {
+  const h = harness();
+  h.bus.emit('param:change', { trackId: 0, key: 'glide', value: 0.5 });
+  h.bus.emit('param:change', { trackId: 0, key: 'modInterp', value: -0.5 });
+  h.scheduler.start();
+  h.advance(1);
+
+  for (const s of h.steps) {
+    for (const key of [
+      'trackId', 'stepIndex', 'audioTime', 'triggered', 'note', 'prevNote',
+      'velocity', 'mod', 'prevMod', 'glideTime', 'glideExponential',
+      'modTime', 'modExponential', 'stepDuration',
+    ]) {
+      assert.ok(key in s, `step is missing ${key}`);
+    }
+    assert.ok(Number.isFinite(s.note) && s.note >= 0 && s.note <= 200);
+    assert.ok(s.velocity >= 0.1 && s.velocity <= 1);
+    assert.ok(s.mod >= 2 && s.mod <= 20);
+    assert.equal(s.glideExponential, true); // positive glide -> exponential
+    assert.equal(s.modExponential, false); // negative interp -> linear
+    assert.ok(s.glideTime > 0 && s.glideTime < s.stepDuration);
+  }
+});
+
+test('the trigger loop produces the paper 70-step super-pattern', () => {
+  // "setting the random trigger loop length to 7 and combining it with a 10-step
+  // Euclidean pattern produces a 70-step pattern" -- which holds when the pulse
+  // count is coprime with the step count. With gcd > 1 the Euclidean cycle
+  // repeats within itself and the combined period is correspondingly shorter.
+  const period = (arr) => {
+    for (let p = 1; p <= arr.length / 2; p += 1) {
+      let ok = true;
+      for (let i = 0; i + p < arr.length; i += 1) {
+        if (arr[i] !== arr[i + p]) { ok = false; break; }
+      }
+      if (ok) return p;
+    }
+    return null;
+  };
+
+  for (const [pulses, expected] of [[3, 70], [7, 70], [4, 35]]) {
+    const h = harness({ bpm: 300 });
+    for (const [k, v] of Object.entries({
+      steps: 10, pulses, logicOp: 3, probability: 0.5,
+      trigLoop: true, trigLoopLength: 7,
+    })) {
+      h.bus.emit('param:change', { trackId: 0, key: k, value: v });
+    }
+    h.scheduler.start();
+    h.advance(40);
+    const bits = h.steps.map((s) => (s.triggered ? 1 : 0));
+    assert.ok(bits.length > 300, `only ${bits.length} steps`);
+    assert.equal(period(bits), expected, `10/${pulses} against a 7-loop`);
+  }
+});

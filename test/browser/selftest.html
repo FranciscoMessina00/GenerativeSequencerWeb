@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>DSP self-test</title>
+<style>
+  body { background:#12151a; color:#dde3ea; font:12px/1.6 ui-monospace,monospace; padding:20px; }
+  pre { white-space:pre-wrap; }
+</style>
+</head>
+<body><pre id="out">running…</pre>
+<script type="module">
+/*
+ * Browser-side DSP verification.
+ *
+ * The Node tests cover the pure model, but the worklets themselves can only run
+ * in a real AudioWorkletGlobalScope -- and a runtime error inside a worklet is
+ * silent, the node just outputs zeros. This renders the actual graph through an
+ * OfflineAudioContext and inspects the samples, so worklet bugs surface as
+ * numbers rather than as unexplained silence.
+ *
+ * Serve the project root and open /test/browser/selftest.html.
+ */
+const lines = [];
+const log = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
+
+const SR = 48000;
+function goertzel(buf, f, from, len) {
+  const w = 2 * Math.PI * f / SR, c = 2 * Math.cos(w);
+  let s1 = 0, s2 = 0;
+  for (let i = from; i < from + len; i++) { const s = buf[i] + c * s1 - s2; s2 = s1; s1 = s; }
+  return Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - c * s1 * s2)) / (len / 2);
+}
+const stats = (b, from = 0) => {
+  let peak = 0, sum = 0, bad = 0;
+  for (let i = from; i < b.length; i++) {
+    const v = b[i];
+    if (!Number.isFinite(v)) bad++;
+    const a = Math.abs(v); if (a > peak) peak = a; sum += v * v;
+  }
+  return { peak, rms: Math.sqrt(sum / (b.length - from)), bad };
+};
+
+async function render(seconds, setup, { dryWet = -1, grainPitch = 1 } = {}) {
+  const ctx = new OfflineAudioContext({ numberOfChannels: 1, length: Math.round(seconds * SR), sampleRate: SR });
+  await ctx.audioWorklet.addModule('../../src/audio/worklets/modal-processor.js');
+  await ctx.audioWorklet.addModule('../../src/audio/worklets/granulator-processor.js');
+  const modal = new AudioWorkletNode(ctx, 'modal-processor', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
+  const gran = new AudioWorkletNode(ctx, 'granulator-processor', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+  gran.parameters.get('dryWet').value = dryWet;
+  gran.parameters.get('grainPitch').value = grainPitch;
+  modal.connect(gran); gran.connect(ctx.destination);
+  setup(modal, ctx);
+  const rendered = await ctx.startRendering();
+  return rendered.getChannelData(0);
+}
+
+try {
+  const { buildNote, midiToHz, modeGains } = await import('../../src/audio/modal/modalModel.js');
+  const { Track } = await import('../../src/sequencer/Track.js');
+  const { Rng } = await import('../../src/core/rng.js');
+  log('modules loaded OK');
+
+  const mk = (o = {}) => buildNote({ midinote: 60, velocity: 1, pluckPosition: 4, modes: 16,
+    stiffness: 11, damping: 0.5, decayScale: 1, sampleRate: SR, ...o });
+  const noteMsg = (n, o = {}) => ({
+    type: 'noteOn', startTime: 0.05, count: n.count, ratios: n.ratios, decays: n.decays,
+    gainsFrom: n.gains, gainsTo: n.gains, f0From: midiToHz(60), f0To: midiToHz(60),
+    glideTime: 0, glideExponential: false, mFrom: 4, mTo: 4, modTime: 0,
+    modExponential: false, velocity: 1, pluckSoftness: 0.35, ...o });
+
+  // --- 1. the modal voice sounds at all -----------------------------------
+  {
+    const n = mk();
+    const b = await render(1.0, (m) => m.port.postMessage(noteMsg(n)));
+    const s = stats(b);
+    log(`1. single note: peak=${s.peak.toFixed(4)} rms=${s.rms.toFixed(4)} nonfinite=${s.bad}`);
+    log(`   silent before startTime: ${stats(b.subarray(0, Math.round(0.04 * SR))).peak.toExponential(2)}`);
+    const f0 = midiToHz(60);
+    const at = (f) => goertzel(b, f, Math.round(0.06 * SR), Math.round(0.3 * SR));
+    log(`   partial 1 @${f0.toFixed(1)}Hz = ${at(f0).toFixed(5)}`);
+    log(`   partial 2 @${(f0 * n.ratios[1]).toFixed(1)}Hz = ${at(f0 * n.ratios[1]).toFixed(5)}`);
+    log(`   partial 3 @${(f0 * n.ratios[2]).toFixed(1)}Hz = ${at(f0 * n.ratios[2]).toFixed(5)}`);
+    log(`   off-partial @${(f0 * 1.5).toFixed(1)}Hz = ${at(f0 * 1.5).toFixed(5)}`);
+  }
+
+  // --- 2. sample-accurate start -------------------------------------------
+  {
+    const n = mk();
+    const b = await render(0.5, (m) => m.port.postMessage(noteMsg(n, { startTime: 0.2 })));
+    let first = -1;
+    for (let i = 0; i < b.length; i++) if (Math.abs(b[i]) > 1e-6) { first = i; break; }
+    log(`2. start frame: expected ${Math.round(0.2 * SR)}, got ${first} (delta ${first - Math.round(0.2 * SR)} samples)`);
+  }
+
+  // --- 3. centre pluck nulls even partials --------------------------------
+  {
+    for (const m of [2, 6]) {
+      const n = mk({ pluckPosition: m });
+      const b = await render(0.6, (mn) => mn.port.postMessage(noteMsg(n, { mFrom: m, mTo: m })));
+      const f0 = midiToHz(60);
+      const rel = [];
+      for (let k = 0; k < 5; k++) rel.push(goertzel(b, f0 * n.ratios[k], Math.round(0.06 * SR), Math.round(0.2 * SR)));
+      log(`3. m=${m} partials rel. to fundamental: ${rel.map((v) => (v / rel[0]).toFixed(4)).join(' ')}`);
+    }
+  }
+
+  // --- 4. glide actually moves the pitch ----------------------------------
+  {
+    const n = mk();
+    const b = await render(0.8, (m) => m.port.postMessage(noteMsg(n, {
+      f0From: midiToHz(48), f0To: midiToHz(60), glideTime: 0.095, glideExponential: true })));
+    const early = Math.round(0.055 * SR), late = Math.round(0.18 * SR);
+    const win = Math.round(0.03 * SR);
+    log(`4. glide: E@C3 during attack=${goertzel(b, midiToHz(48), early, win).toFixed(5)}, ` +
+        `E@C4 after ramp=${goertzel(b, midiToHz(60), late, win).toFixed(5)}, ` +
+        `E@C3 after ramp=${goertzel(b, midiToHz(48), late, win).toFixed(5)}`);
+    const s = stats(b); log(`   peak=${s.peak.toFixed(4)} nonfinite=${s.bad}`);
+  }
+
+  // --- 5. pluck-position ramp ---------------------------------------------
+  {
+    const n = mk({ pluckPosition: 16 });
+    const b = await render(0.8, (m) => m.port.postMessage(noteMsg(n, {
+      gainsFrom: modeGains(n.count, 2), gainsTo: n.gains,
+      mFrom: 2, mTo: 16, modTime: 0.095, modExponential: false })));
+    const s = stats(b);
+    log(`5. pluck ramp 2->16: peak=${s.peak.toFixed(4)} rms=${s.rms.toFixed(4)} nonfinite=${s.bad}`);
+  }
+
+  // --- 6. granulator: dry bypass is exact, wet produces signal ------------
+  {
+    const n = mk();
+    const dry = await render(1.0, (m) => m.port.postMessage(noteMsg(n)), { dryWet: -1 });
+    const wet = await render(1.0, (m) => m.port.postMessage(noteMsg(n)), { dryWet: 1 });
+    const mid = await render(1.0, (m) => m.port.postMessage(noteMsg(n)), { dryWet: 0 });
+    log(`6. dry peak=${stats(dry).peak.toFixed(4)} rms=${stats(dry).rms.toFixed(4)}`);
+    log(`   wet peak=${stats(wet).peak.toFixed(4)} rms=${stats(wet).rms.toFixed(4)}`);
+    log(`   mid peak=${stats(mid).peak.toFixed(4)} rms=${stats(mid).rms.toFixed(4)}`);
+    // grain pitch transposition: shift up an octave, look for energy at 2*f0
+    const up = await render(1.5, (m) => m.port.postMessage(noteMsg(n)), { dryWet: 1, grainPitch: 2 });
+    const f0 = midiToHz(60);
+    log(`   grainPitch=2: E@${f0.toFixed(0)}=${goertzel(up, f0, SR / 2, SR / 2).toFixed(5)} ` +
+        `E@${(2 * f0).toFixed(0)}=${goertzel(up, 2 * f0, SR / 2, SR / 2).toFixed(5)}`);
+  }
+
+  // --- 7. a full sequence through the real Track + voice pool ------------
+  {
+    const track = new Track(0, new Rng(2024));
+    for (const [k, v] of Object.entries({ steps: 16, pulses: 5, probability: 0.3, logicOp: 1, glide: 0.4 })) track.setParam(k, v);
+    const stepDur = 60 / (160 * 4);
+    const b = await render(6, (modal) => {
+      let t = 0.05, fired = 0;
+      for (let i = 0; i < 6 / stepDur - 4; i++) {
+        const s = track.step(stepDur);
+        if (s.triggered) {
+          fired++;
+          const n = buildNote({ midinote: s.note, velocity: s.velocity, pluckPosition: s.mod,
+            modes: 16, stiffness: 11, damping: 0.5, decayScale: 1, sampleRate: SR });
+          modal.port.postMessage({ type: 'noteOn', startTime: t, count: n.count, ratios: n.ratios,
+            decays: n.decays, gainsFrom: n.gains, gainsTo: n.gains,
+            f0From: midiToHz(s.prevNote), f0To: midiToHz(s.note),
+            glideTime: s.glideTime, glideExponential: s.glideExponential,
+            mFrom: s.prevMod, mTo: s.mod, modTime: s.modTime, modExponential: s.modExponential,
+            velocity: s.velocity, pluckSoftness: 0.35 });
+        }
+        t += stepDur;
+      }
+      window.__fired = fired;
+    }, { dryWet: -0.4 });
+    const s = stats(b);
+    log(`7. sequence: ${window.__fired} notes, peak=${s.peak.toFixed(4)} rms=${s.rms.toFixed(4)} nonfinite=${s.bad}`);
+    log(`   output stays bounded (<=1): ${s.peak <= 1.0000001}`);
+  }
+
+  log('ALL CHECKS COMPLETED');
+  document.title = 'selftest-done';
+} catch (e) {
+  log(`FATAL: ${e && e.stack ? e.stack : e}`);
+  document.title = 'selftest-error';
+}
+</script></body></html>
