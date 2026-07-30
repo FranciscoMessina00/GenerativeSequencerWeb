@@ -1,6 +1,6 @@
 import { EventBus } from './core/EventBus.js';
 import { Rng } from './core/rng.js';
-import { paramSpec } from './core/paramSchema.js';
+import { PARAM_GROUPS, paramSpec } from './core/paramSchema.js';
 import { Track } from './sequencer/Track.js';
 import { Scheduler } from './sequencer/Scheduler.js';
 import { AudioEngine } from './audio/AudioEngine.js';
@@ -28,13 +28,34 @@ const scheduler = new Scheduler({
   tracks,
 });
 
-const ui = new UIController({ bus, root: document.getElementById('controls') });
-ui.build();
+// The three parameters that define the Euclidean pattern live inside the ring, as
+// drag-numbers, since they are what the ring is a picture of.
+const EUCLID_KEYS = ['steps', 'pulses', 'rotation'];
+
+const hubEl = document.getElementById('hub');
+const ui = new UIController({ bus });
+ui.renderDragNumbers(hubEl, EUCLID_KEYS);
+// The rest of the rhythm controls sit under the ring; everything else goes in the
+// side panel.
+ui.renderGroups(document.getElementById('rhythm-controls'), ['Rhythm'], {
+  skip: EUCLID_KEYS,
+});
+ui.renderGroups(
+  document.getElementById('controls'),
+  PARAM_GROUPS.filter((g) => g !== 'Rhythm'),
+);
 ui.attachReadout(document.getElementById('readout'));
 
 const view = new EuclidView(
   document.getElementById('ring'),
   () => audio.currentTime,
+  // Fit the hub overlay to the largest square that fits inside the hub circle,
+  // so no control can spill past the sectors at any column width.
+  ({ innerR }) => {
+    const side = Math.max(60, (innerR * 2) / Math.SQRT2 - 8);
+    hubEl.style.width = `${side}px`;
+    hubEl.style.height = `${side}px`;
+  },
 );
 view.setPattern(tracks[0].getPattern());
 

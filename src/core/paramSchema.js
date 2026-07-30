@@ -17,9 +17,11 @@ export const PARAM_SCHEMA = [
   // Source defaults are steps=1/pulses=1, which is a constant 16th-note pulse.
   // Defaulted to 5-in-16 instead so the instrument makes a recognisable pattern
   // on first load; every other default below is the source's.
-  { key: 'steps', label: 'Euclid Steps', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 16 },
-  { key: 'pulses', label: 'Euclid Triggers', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 5 },
-  { key: 'rotation', label: 'Euclid Rotation', group: 'Rhythm', target: 'track', min: 0, max: 32, step: 1, def: 0 },
+  // `short` is used where the context already says "Euclid" -- these three render
+  // inside the step ring, so repeating the word three times only costs space.
+  { key: 'steps', label: 'Euclid Steps', short: 'Steps', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 16 },
+  { key: 'pulses', label: 'Euclid Triggers', short: 'Pulses', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 5 },
+  { key: 'rotation', label: 'Euclid Rotation', short: 'Rotation', group: 'Rhythm', target: 'track', min: 0, max: 32, step: 1, def: 0 },
   { key: 'logicOp', label: 'Logic Operator', group: 'Rhythm', target: 'track', min: 1, max: 4, step: 1, def: 1, display: 'logic' },
   { key: 'probability', label: 'Trig Probability', group: 'Rhythm', target: 'track', min: 0, max: 1, step: 0.01, def: 0 },
   { key: 'trigLoop', label: 'Trig Loop', group: 'Rhythm', target: 'track', type: 'toggle', def: false },

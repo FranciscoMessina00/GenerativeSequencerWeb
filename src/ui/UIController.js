@@ -1,6 +1,7 @@
-import { PARAM_GROUPS, PARAM_SCHEMA } from '../core/paramSchema.js';
+import { PARAM_SCHEMA } from '../core/paramSchema.js';
 import { LOGIC_OP_NAMES } from '../sequencer/logic.js';
 import { SCALE_NAMES } from '../sequencer/scales.js';
+import { DragNumber } from './DragNumber.js';
 
 /**
  * Builds the control surface from the param schema and publishes changes to the
@@ -12,12 +13,13 @@ import { SCALE_NAMES } from '../sequencer/scales.js';
  * a second track is added.
  */
 export class UIController {
-  constructor({ bus, root, trackId = 0 }) {
+  constructor({ bus, trackId = 0 }) {
     this.bus = bus;
-    this.root = root;
     this.trackId = trackId;
     this.valueLabels = new Map();
     this.inputs = new Map();
+    /** key -> DragNumber, for the controls rendered inside the step ring. */
+    this.dragNumbers = new Map();
   }
 
   /** Human-readable value for the enum-ish params, which are integers on the wire. */
@@ -33,11 +35,22 @@ export class UIController {
     this.bus.emit('param:change', { trackId: this.trackId, key, value });
   }
 
-  build() {
-    const grouped = new Map(PARAM_GROUPS.map((g) => [g, []]));
-    for (const spec of PARAM_SCHEMA) grouped.get(spec.group).push(spec);
+  /**
+   * Render the named groups as slider panels into `container`.
+   *
+   * Rendering is split by target rather than done in one pass, because some
+   * params live inside the step ring and the rest live in the side panel. Keys in
+   * `skip` are omitted so they can be rendered elsewhere without appearing twice.
+   */
+  renderGroups(container, groupNames, { skip = [] } = {}) {
+    const skipped = new Set(skip);
 
-    for (const group of PARAM_GROUPS) {
+    for (const group of groupNames) {
+      const specs = PARAM_SCHEMA.filter(
+        (s) => s.group === group && !skipped.has(s.key),
+      );
+      if (specs.length === 0) continue;
+
       const section = document.createElement('section');
       section.className = 'group';
 
@@ -45,10 +58,28 @@ export class UIController {
       heading.textContent = group;
       section.appendChild(heading);
 
-      for (const spec of grouped.get(group)) {
-        section.appendChild(this.#buildControl(spec));
-      }
-      this.root.appendChild(section);
+      for (const spec of specs) section.appendChild(this.#buildControl(spec));
+      container.appendChild(section);
+    }
+  }
+
+  /**
+   * Render the given keys as drag-numbers, with no group chrome.
+   *
+   * Used for the Euclidean parameters inside the ring, where a heading and slider
+   * tracks would not fit and would compete with the pattern itself for attention.
+   */
+  renderDragNumbers(container, keys) {
+    for (const key of keys) {
+      const spec = PARAM_SCHEMA.find((s) => s.key === key);
+      if (!spec) continue;
+      const control = new DragNumber({
+        spec,
+        format: (v) => this.#formatValue(spec, v),
+        onInput: (v) => this.#emit(spec.key, v),
+      });
+      this.dragNumbers.set(key, control);
+      container.appendChild(control.element);
     }
   }
 

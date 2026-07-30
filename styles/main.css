@@ -59,25 +59,59 @@ button.primary.active { background: #2c4a3a; border-color: var(--accent-2); colo
 
 main {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 380px 1fr;
   gap: 16px;
   padding: 16px 18px 32px;
   align-items: start;
 }
-@media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
 
-/* ---- monitor column ---- */
+/* ---- rhythm column: the ring, with the Euclid controls inside it ---- */
 
-.monitor {
-  position: sticky;
-  top: 74px;
+.rhythm-col {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
 }
 
-#ring { width: 100%; height: 260px; display: block; }
+/* Square, so the ring is actually round and as large as the column allows.
+   Capped, because on the single-column layout a full-width ring would otherwise
+   be ~880 px tall and push every other control off the screen. */
+.ring-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+  aspect-ratio: 1 / 1;
+}
+
+#ring { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* Without this, items default to `stretch` and each .dragnum fills the full
+     hub width -- which is also why its own padding looked like it did nothing. */
+  align-items: center;
+  gap: 6px;
+}
+
+#rhythm-controls .group {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.monitor { margin-top: 12px; }
 
 .legend {
   display: flex;
@@ -88,10 +122,11 @@ main {
   font-size: 11px;
 }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
-.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-.dot.filled { background: #4a90b8; }
-.dot.hollow { border: 1.5px solid rgba(255, 255, 255, 0.3); }
-.dot.fired { border: 1.5px solid rgba(130, 230, 150, 0.85); }
+/* Small wedge-ish bars, matching the ring's sectors rather than dots. */
+.swatch { width: 7px; height: 13px; border-radius: 1px; display: inline-block; }
+.swatch.pulse { background: #4a90b8; }
+.swatch.rest { background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(255, 255, 255, 0.16); }
+.swatch.fired { background: rgba(130, 230, 150, 0.9); height: 5px; }
 
 #readout {
   margin: 0;
@@ -190,6 +225,64 @@ input[type="range"]::-moz-range-thumb {
   gap: 8px;
 }
 .control.toggle .control-header { flex: 1; margin-bottom: 0; }
+
+/* ---- drag-number ---- */
+
+.dragnum {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: ns-resize;
+  /* A drag that starts here must not select the label text or begin a
+     browser-native drag, both of which would fight the pointer capture. */
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  border: 1px solid transparent;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+
+.dragnum__value {
+  font: 600 21px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  transition: color 0.12s, text-shadow 0.12s;
+}
+
+.dragnum__label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: color 0.12s;
+}
+
+.dragnum:hover,
+.dragnum:focus-visible {
+  background: rgba(111, 184, 224, 0.09);
+  border-color: rgba(111, 184, 224, 0.28);
+  outline: none;
+}
+
+/* The value is what the drag changes, so that is what lights up on hover. */
+.dragnum:hover .dragnum__value,
+.dragnum:focus-visible .dragnum__value,
+.dragnum.is-dragging .dragnum__value {
+  color: var(--accent);
+  text-shadow: 0 0 14px rgba(111, 184, 224, 0.45);
+}
+
+.dragnum:hover .dragnum__label,
+.dragnum:focus-visible .dragnum__label { color: var(--text); }
+
+.dragnum.is-dragging {
+  background: rgba(111, 184, 224, 0.16);
+  border-color: rgba(111, 184, 224, 0.5);
+}
 .control.toggle input[type="checkbox"] {
   width: 15px;
   height: 15px;

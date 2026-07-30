@@ -20,14 +20,22 @@
   </header>
 
   <main>
-    <aside class="monitor">
-      <canvas id="ring" aria-label="Euclidean step ring"></canvas>
-      <div class="legend">
-        <span><i class="dot filled"></i> Euclid pulse</span>
-        <span><i class="dot hollow"></i> no pulse</span>
-        <span><i class="dot fired"></i> triggered</span>
+    <aside class="rhythm-col">
+      <div class="ring-wrap">
+        <canvas id="ring" aria-label="Euclidean step ring"></canvas>
+        <!-- Sized in JS to the inscribed square of the ring's hub. -->
+        <div class="hub" id="hub"></div>
       </div>
-      <pre id="readout" aria-live="off"></pre>
+      <div class="legend">
+        <span><i class="swatch pulse"></i> Euclid pulse</span>
+        <span><i class="swatch rest"></i> no pulse</span>
+        <span><i class="swatch fired"></i> triggered</span>
+      </div>
+      <div id="rhythm-controls"></div>
+      <!-- Hidden for now; main.js still feeds it, so unhiding is a one-liner. -->
+      <div class="monitor" id="monitor" hidden>
+        <pre id="readout" aria-live="off"></pre>
+      </div>
     </aside>
     <div class="panel" id="controls"></div>
   </main>
