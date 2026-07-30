@@ -32,6 +32,9 @@ export class HistoryBuffer {
     this.loop = this.data.slice(0, 1);
     this.loopLength = 1;
     this.loopReadIndex = 0;
+    // Total steps the loop has ever advanced -- absolute, never reset and
+    // never truncated to the current length. See captureLoop() for why.
+    this.loopStepCount = 0;
   }
 
   /** Rotate left by one, then write `value` at the write head. */
@@ -64,6 +67,12 @@ export class HistoryBuffer {
    *
    * `permNormalized` is a 0..1 knob position, scaled to a permutation index
    * against the loop's own length -- see permutationIndex().
+   *
+   * `loopStepCount` is deliberately left untouched here -- see advanceLoop().
+   * The loop's *content* already comes back identical on its own whenever you
+   * return to a (length, permutation) pair you've used before, since it's a
+   * pure function of the frozen history underneath; the phase is the only
+   * part that needs this care.
    */
   captureLoop(length, permNormalized = 0) {
     this.loopLength = Math.max(1, Math.min(this.size, Math.floor(length)));
@@ -76,18 +85,27 @@ export class HistoryBuffer {
     this.loopReadIndex = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 2));
   }
 
-  /** Rotate the loop left by one, mirroring the history rotation. */
+  /**
+   * Advance the loop by one step.
+   *
+   * Counts absolute steps rather than storing a phase already folded into the
+   * current length. Folding early is lossy: once the count has been reduced
+   * mod a shorter length, the higher-order information needed to resume a
+   * longer length correctly is gone, so returning to a length you'd visited
+   * before would land on a different point in its cycle than if you'd never
+   * left. Folding only at read time (see loopCurrent/loopPrevious) means every
+   * length has its own always-correct phase, recoverable from the one shared
+   * count no matter what other lengths were visited in between -- as if each
+   * length's cycle had simply kept running in the background the whole time.
+   */
   advanceLoop() {
     if (this.loopLength <= 1) return;
-    const first = this.loop[0];
-    for (let i = 0; i < this.loopLength - 1; i += 1) {
-      this.loop[i] = this.loop[i + 1];
-    }
-    this.loop[this.loopLength - 1] = first;
+    this.loopStepCount += 1;
   }
 
   get loopCurrent() {
-    return this.loop[this.loopReadIndex];
+    const phase = this.loopStepCount % this.loopLength;
+    return this.loop[(this.loopReadIndex + phase) % this.loopLength];
   }
 
   /**
@@ -98,7 +116,8 @@ export class HistoryBuffer {
    * glide to themselves instead of breaking.
    */
   get loopPrevious() {
-    const index = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 3));
-    return this.loop[index];
+    const phase = this.loopStepCount % this.loopLength;
+    const baseIndex = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 3));
+    return this.loop[(baseIndex + phase) % this.loopLength];
   }
 }

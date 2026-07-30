@@ -238,3 +238,81 @@ test('the trigger loop produces the paper 70-step super-pattern', () => {
     assert.equal(period(bits), expected, `10/${pulses} against a 7-loop`);
   }
 });
+
+test('recapturing a loop with the same permutation is a true no-op', () => {
+  // Regression test: captureLoop used to reset the loop's rotational phase to
+  // a fixed starting point on every call, while the Euclidean playhead kept
+  // advancing untouched. Nudging the permutation knob and setting it back to
+  // its original value restored the loop's *content* correctly but rewound
+  // *where in its cycle playback was*, audibly shifting the combined pattern
+  // relative to what it would have been if left alone. See HistoryBuffer.js.
+  const setup = (h) => {
+    for (const [k, v] of Object.entries({
+      steps: 10, pulses: 3, logicOp: 3, probability: 0.5,
+      trigLoop: true, trigLoopLength: 7,
+    })) {
+      h.bus.emit('param:change', { trackId: 0, key: k, value: v });
+    }
+  };
+
+  const untouched = harness({ bpm: 300, seed: 99 });
+  setup(untouched);
+  untouched.scheduler.start();
+  untouched.advance(3); // let the loop run for a while before comparing
+
+  const touched = harness({ bpm: 300, seed: 99 });
+  setup(touched);
+  touched.scheduler.start();
+  touched.advance(3);
+  // Nudge the permutation away and back, exactly like moving the knob.
+  touched.bus.emit('param:change', { trackId: 0, key: 'trigPerm', value: 0.4 });
+  touched.bus.emit('param:change', { trackId: 0, key: 'trigPerm', value: 0.9 });
+  touched.bus.emit('param:change', { trackId: 0, key: 'trigPerm', value: 0 });
+
+  const before = untouched.steps.length;
+  untouched.advance(5);
+  touched.advance(5);
+
+  const untouchedBits = untouched.steps.slice(before).map((s) => (s.triggered ? 1 : 0));
+  const touchedBits = touched.steps.slice(before).map((s) => (s.triggered ? 1 : 0));
+  assert.ok(untouchedBits.length > 50, 'expected a substantial comparison window');
+  assert.deepEqual(touchedBits, untouchedBits);
+});
+
+test('revisiting a loop length restores the phase that length would have reached on its own', () => {
+  // Regression test: captureLoop used to fold the loop's phase into whatever
+  // length was current, which is lossy -- once reduced modulo a shorter
+  // length, there is no way back to what a longer length's phase "should" be.
+  // Visiting 16 -> 8 -> 20 -> 16 used to land length 16 on a different point
+  // in its cycle than if it had never been left. See HistoryBuffer.js's
+  // loopStepCount, which now tracks steps absolutely and folds only at read
+  // time so every length keeps its own correct phase throughout.
+  //
+  // Driven at the Track level (direct .step() calls) rather than through the
+  // scheduler, so both runs advance by an identical, exactly-controlled
+  // number of steps -- no wall-clock timing to risk misaligning the two.
+  const stepDur = 0.05;
+  const baseParams = { steps: 10, pulses: 3, logicOp: 3, probability: 0.5, trigLoop: true };
+  const run = (track, n) => Array.from({ length: n }, () => (track.step(stepDur).triggered ? 1 : 0));
+
+  // Baseline stays at length 16 for the same total step count "touched" below
+  // spends across all three lengths, so the Euclidean playhead -- which
+  // advances every step regardless of loop length -- lines up before the two
+  // are compared.
+  const baseline = new Track(0, new Rng(55));
+  for (const [k, v] of Object.entries({ ...baseParams, trigLoopLength: 16 })) baseline.setParam(k, v);
+  run(baseline, 34);
+  const baselineContinuation = run(baseline, 30);
+
+  const touched = new Track(0, new Rng(55));
+  for (const [k, v] of Object.entries({ ...baseParams, trigLoopLength: 16 })) touched.setParam(k, v);
+  run(touched, 26);
+  touched.setParam('trigLoopLength', 8);
+  run(touched, 5);
+  touched.setParam('trigLoopLength', 20);
+  run(touched, 3);
+  touched.setParam('trigLoopLength', 16);
+  const touchedContinuation = run(touched, 30);
+
+  assert.deepEqual(touchedContinuation, baselineContinuation);
+});
