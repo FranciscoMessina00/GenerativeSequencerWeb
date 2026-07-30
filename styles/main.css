@@ -226,6 +226,7 @@ input[type="range"]::-moz-range-thumb {
 }
 .control.toggle .control-header { flex: 1; margin-bottom: 0; }
 
+
 /* ---- drag-number ---- */
 
 .dragnum {
@@ -297,6 +298,21 @@ input[type="range"]::-moz-range-thumb {
 .dragnum--compact { padding: 2px 5px; }
 .dragnum--compact .dragnum__value { font-size: 12px; }
 .dragnum--compact .dragnum__label { font-size: 7px; }
+
+/* Right-aligned variant, for a .dragnum sitting at the right edge of a row
+   (e.g. Glide, next to its mode icon) where the value and label should line
+   up against that edge rather than sit centered over each other. */
+.dragnum--right { align-items: flex-end; }
+
+/* Label-first variant, for a .dragnum sharing a row with another control
+   whose own label sits on top (e.g. Glide next to Scale's dropdown) -- puts
+   the label on the same line as that other control's label, value below.
+   Zeroes the top padding .dragnum normally reserves above its (usually
+   hidden-behind-the-value) label, since .dropdown has none above its own
+   label -- without this the two labels sit 4px out of line. Widens the gap
+   to the value, since 1px (fine when the label sits hidden below the value)
+   reads as cramped now that the label is the more prominent top line. */
+.dragnum--label-first { flex-direction: column-reverse; padding-top: 0; gap: 7px; }
 
 /* ---- bias/spread slider ---- */
 
@@ -401,4 +417,172 @@ input[type="range"]::-moz-range-thumb {
 .bsslider__track.is-dragging .bsslider__handle,
 .bsslider__track:focus-visible .bsslider__handle {
   box-shadow: 0 0 0 1px rgba(111, 184, 224, 0.85), 0 0 12px rgba(111, 184, 224, 0.6);
+}
+
+/* ---- control row: places a couple of small controls side by side ---- */
+
+.control-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---- dropdown (scale) ---- */
+
+.dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Scale and Glide share this row: the dropdown flexes to fill it, Glide's
+   control stays a fixed width, so Glide naturally lands flush right. Aligned
+   to the top so the GLIDE and SCALE labels sit on the same line. */
+.dropdown-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.dropdown-row .dropdown { flex: 1; min-width: 0; }
+
+.dropdown__label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dropdown__select {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dropdown__select:hover,
+.dropdown__select:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* ---- glide control: drag-number + mode-toggle icon ---- */
+
+.glide-control {
+  display: flex;
+  /* Bottom-aligned so the icon sits level with the value, not the taller
+     label-plus-value stack now that the label moved above it. */
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.glide-control__mode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  /* Nudges the icon up within its fixed, bottom-aligned footprint to land
+     right on the value's level. */
+  padding: 0 0 11px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.glide-control__mode:hover,
+.glide-control__mode:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+
+.glide-control__icon {
+  width: 20px;
+  height: 20px;
+}
+.glide-control__icon line,
+.glide-control__icon path {
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+/* ---- knob: generic rotary trail + handle (currently unused, kept for the
+   next control that needs one) ---- */
+
+.knob {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 76px;
+  cursor: ns-resize;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  border-radius: 8px;
+  transition: background-color 0.12s;
+}
+.knob:hover,
+.knob:focus-visible,
+.knob.is-dragging {
+  background: rgba(111, 184, 224, 0.08);
+  outline: none;
+}
+
+.knob__label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* No background disc behind the arc -- per "leave only the trail and a small
+   circle," the knob is just those two shapes floating on the panel itself. */
+.knob__face {
+  display: block;
+  width: 52px;
+  height: 52px;
+}
+
+.knob__track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+/* Fixed reference mark at value 0, bipolar only -- see Knob.js's `bipolar`. */
+.knob__center-tick {
+  fill: var(--muted);
+}
+
+/* The handle: same role as a linear slider's thumb, just riding an arc. */
+.knob__handle {
+  fill: var(--accent);
+  stroke: #0e1116;
+  stroke-width: 2;
+  transition: r 0.12s;
+}
+.knob:hover .knob__handle,
+.knob.is-dragging .knob__handle,
+.knob:focus-visible .knob__handle {
+  r: 6;
+}
+
+.knob__value {
+  font: 11px ui-monospace, monospace;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.knob:hover .knob__value,
+.knob.is-dragging .knob__value,
+.knob:focus-visible .knob__value {
+  color: var(--accent);
 }

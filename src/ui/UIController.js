@@ -131,6 +131,7 @@ export class UIController {
     header.className = 'control-header';
     header.append(label, value);
     wrapper.append(header, input);
+
     return wrapper;
   }
 

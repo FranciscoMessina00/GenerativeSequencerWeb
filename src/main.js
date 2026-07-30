@@ -7,6 +7,9 @@ import { AudioEngine } from './audio/AudioEngine.js';
 import { UIController } from './ui/UIController.js';
 import { EuclidView } from './ui/EuclidView.js';
 import { BiasSpreadSlider } from './ui/BiasSpreadSlider.js';
+import { Dropdown } from './ui/Dropdown.js';
+import { GlideControl } from './ui/GlideControl.js';
+import { SCALES } from './sequencer/scales.js';
 
 /**
  * Bootstrap. The only module that knows about all the others.
@@ -61,10 +64,33 @@ for (const [group, axes] of Object.entries(BIAS_SPREAD_AXES)) {
 }
 const sliderSkipKeys = Object.values(BIAS_SPREAD_AXES).flatMap((a) => [a.bias, a.spread]);
 
+// Scale (an enumerated pick) and Glide (an amount + a mode toggle, see
+// src/ui/GlideControl.js) share one row below the Note bias/spread slider --
+// Scale flexes to fill it, Glide sits fixed-width at the right. See
+// src/ui/Dropdown.js.
+const scaleDropdown = new Dropdown({
+  spec: paramSpec('scale'),
+  options: SCALES.map((s) => ({ value: s.id, label: s.name })),
+  onInput: (value) => bus.emit('param:change', { trackId: 0, key: 'scale', value }),
+});
+const glideControl = new GlideControl({
+  bus,
+  trackId: 0,
+  amountSpec: paramSpec('glideAmount'),
+  modeSpec: paramSpec('glideMode'),
+});
+const scaleRow = document.createElement('div');
+scaleRow.className = 'control-row dropdown-row';
+scaleRow.append(scaleDropdown.element, glideControl.element);
+
+const pitchPrepend = document.createElement('div');
+pitchPrepend.append(sliderPrepend.Pitch, scaleRow);
+sliderPrepend.Pitch = pitchPrepend;
+
 ui.renderGroups(
   document.getElementById('controls'),
   PARAM_GROUPS.filter((g) => g !== 'Rhythm'),
-  { skip: sliderSkipKeys, prepend: sliderPrepend },
+  { skip: [...sliderSkipKeys, 'scale', 'glideAmount', 'glideMode'], prepend: sliderPrepend },
 );
 ui.attachReadout(document.getElementById('readout'));
 

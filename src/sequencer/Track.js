@@ -101,19 +101,26 @@ export class Track {
   }
 
   /**
-   * Convert a -1..1 glide/interp knob into a ramp spec.
+   * Shared ramp-time formula for glide and modulation interpolation.
    *
    * From `TriggerWithGlide.scd:387-393`: the ramp lasts one step minus 30 ms
-   * scaled by the knob magnitude, and the sign chooses the curve -- negative
-   * uses `Line.kr` (linear in pitch), positive uses `XLine.kr` (exponential in
-   * frequency, i.e. linear in pitch-space). Zero skips the ramp entirely, which
-   * the original did to dodge a glitch with zero-length lines.
+   * scaled by the magnitude, and the mode chooses the curve -- linear uses
+   * `Line.kr`, exponential uses `XLine.kr` (exponential in frequency, i.e.
+   * linear in pitch-space). Zero magnitude skips the ramp entirely, which the
+   * original did to dodge a glitch with zero-length lines -- and makes the
+   * mode moot, since there's no ramp for it to shape.
+   *
+   * The two callers below derive `(magnitude, exponential)` differently:
+   * modInterp is still one signed -1..1 knob (sign = mode, ported verbatim
+   * from the source); glide is now two independent params, `glideAmount`
+   * (unipolar) and `glideMode` (a toggle), driven by GlideControl.js. Same
+   * formula either way -- only how its inputs are produced differs.
    */
-  #rampFor(amount, stepDuration) {
-    if (amount === 0) return { time: 0, exponential: false };
+  #ramp(magnitude, exponential, stepDuration) {
+    if (magnitude === 0) return { time: 0, exponential: false };
     return {
-      time: Math.max(0, (stepDuration - 0.03) * Math.abs(amount)),
-      exponential: amount > 0,
+      time: Math.max(0, (stepDuration - 0.03) * magnitude),
+      exponential,
     };
   }
 
@@ -151,8 +158,8 @@ export class Track {
       spread: p.modSpread,
     });
 
-    const glide = this.#rampFor(p.glide, stepDuration);
-    const modRamp = this.#rampFor(p.modInterp, stepDuration);
+    const glide = this.#ramp(p.glideAmount, p.glideMode, stepDuration);
+    const modRamp = this.#ramp(Math.abs(p.modInterp), p.modInterp > 0, stepDuration);
 
     return {
       trackId: this.trackId,

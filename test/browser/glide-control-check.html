@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- Manual check for GlideControl's click-to-toggle behavior and emitted values. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}</style>
+</head>
+<body>
+<div id="mount"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { GlideControl } from '../../src/ui/GlideControl.js';
+
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+const bus = new EventBus();
+const events = [];
+bus.on('param:change', (e) => events.push(e));
+
+const amountSpec = { key: 'glideAmount', label: 'Glide', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' };
+const modeSpec = { key: 'glideMode', label: 'Glide Mode', def: false };
+const gc = new GlideControl({ bus, trackId: 0, amountSpec, modeSpec });
+document.getElementById('mount').appendChild(gc.element);
+
+const iconShape = () => gc.modeButton.querySelector('line') ? 'line(linear)' : 'path(curve/exp)';
+log('initial icon: ' + iconShape() + ', aria-pressed=' + gc.modeButton.getAttribute('aria-pressed'));
+log('initial display: ' + gc.amountControl.valueEl.textContent);
+
+gc.amountControl.setValue(0.42);
+log('after setValue(0.42) display: ' + gc.amountControl.valueEl.textContent);
+
+gc.modeButton.click();
+log('after 1 click: ' + iconShape() + ', aria-pressed=' + gc.modeButton.getAttribute('aria-pressed'));
+log('emitted: ' + JSON.stringify(events.at(-1)));
+
+log('\nALL CHECKS DONE');
+document.title = 'glide-check-done';
+</script>
+</body>
+</html>

@@ -185,7 +185,11 @@ test('untriggered steps are still emitted, so generators keep advancing', () => 
 
 test('every step carries what the audio engine needs', () => {
   const h = harness();
-  h.bus.emit('param:change', { trackId: 0, key: 'glide', value: 0.5 });
+  // Glide is now an unsigned amount plus a separate mode flag (was one signed
+  // value where the sign doubled as the mode) -- modInterp is untouched by
+  // that change and keeps the old sign convention.
+  h.bus.emit('param:change', { trackId: 0, key: 'glideAmount', value: 0.5 });
+  h.bus.emit('param:change', { trackId: 0, key: 'glideMode', value: true });
   h.bus.emit('param:change', { trackId: 0, key: 'modInterp', value: -0.5 });
   h.scheduler.start();
   h.advance(1);
@@ -201,9 +205,32 @@ test('every step carries what the audio engine needs', () => {
     assert.ok(Number.isFinite(s.note) && s.note >= 0 && s.note <= 200);
     assert.ok(s.velocity >= 0.1 && s.velocity <= 1);
     assert.ok(s.mod >= 2 && s.mod <= 20);
-    assert.equal(s.glideExponential, true); // positive glide -> exponential
+    assert.equal(s.glideExponential, true); // glideMode: true -> exponential
     assert.equal(s.modExponential, false); // negative interp -> linear
     assert.ok(s.glideTime > 0 && s.glideTime < s.stepDuration);
+  }
+});
+
+test('glide amount+mode produces the same ramp as the old signed value did', () => {
+  // Regression/equivalence check: splitting glide into glideAmount (unipolar)
+  // + glideMode (a toggle) must reproduce exactly the same {time, exponential}
+  // the old single signed -1..1 value produced -- same magnitude, mode instead
+  // of sign. Mirrors Track.js's #ramp directly since that's the formula being
+  // guarded.
+  const stepDuration = 0.125;
+  const ramp = (magnitude, exponential) => {
+    if (magnitude === 0) return { time: 0, exponential: false };
+    return { time: Math.max(0, (stepDuration - 0.03) * magnitude), exponential };
+  };
+  const oldRampFor = (amount) => {
+    if (amount === 0) return { time: 0, exponential: false };
+    return { time: Math.max(0, (stepDuration - 0.03) * Math.abs(amount)), exponential: amount > 0 };
+  };
+
+  for (const amount of [-1, -0.7, -0.01, 0, 0.01, 0.4, 1]) {
+    const old = oldRampFor(amount);
+    const next = ramp(Math.abs(amount), amount > 0);
+    assert.deepEqual(next, old, `amount ${amount}`);
   }
 });
 

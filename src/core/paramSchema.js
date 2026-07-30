@@ -41,7 +41,14 @@ export const PARAM_SCHEMA = [
   { key: 'noteBias', label: 'Note Bias', group: 'Pitch', target: 'track', min: 1, max: 127, step: 1, def: 51, display: 'note' },
   { key: 'noteSpread', label: 'Note Spread', group: 'Pitch', target: 'track', min: 0, max: 40, step: 1, def: 4, display: 'semitones' },
   { key: 'scale', label: 'Scale', group: 'Pitch', target: 'track', min: 1, max: 10, step: 1, def: 1, display: 'scale' },
-  { key: 'glide', label: 'Glide (lin | exp)', group: 'Pitch', target: 'track', min: -1, max: 1, step: 0.01, def: 0 },
+  // Split into an unsigned amount plus a separate mode flag, rendered together
+  // by GlideControl.js as a drag-number next to a linear/exponential toggle
+  // icon. The source encoded both in one signed value (sign = curve,
+  // magnitude = amount); Track.js's #ramp reconstructs the exact same ramp
+  // time and curve choice from these two instead -- see Track.js.
+  { key: 'glideAmount', label: 'Glide', group: 'Pitch', target: 'track', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' },
+  // false = linear, true = exponential -- matching the source's sign convention.
+  { key: 'glideMode', label: 'Glide Mode', group: 'Pitch', target: 'track', type: 'toggle', def: false },
   { key: 'noteLoop', label: 'Notes Loop', group: 'Pitch', target: 'track', type: 'toggle', def: false },
   { key: 'noteLoopLength', label: 'Notes Loop Length', group: 'Pitch', target: 'track', min: 1, max: 32, step: 1, def: 1 },
   { key: 'notePerm', label: 'Notes Permutation', group: 'Pitch', target: 'track', min: 0, max: 1, step: 0.001, def: 0 },

@@ -1,0 +1,28 @@
+<!doctype html>
+<!--
+  Manual visual check for the simplified Knob (src/ui/Knob.js). Not wired into
+  main.js -- kept in reserve for a future control per the user's request, so
+  this is the only place it currently renders. Delete once a real caller exists.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles/main.css">
+<style>body { display: flex; gap: 24px; padding: 24px; background: #12151a; align-items: flex-start; }</style>
+</head>
+<body>
+<script type="module">
+import { Knob } from '../../src/ui/Knob.js';
+
+const specBipolar = { key: 'x', label: 'Bipolar Test', min: -1, max: 1, step: 0.01, def: 0.4 };
+const specUnipolar = { key: 'y', label: 'Unipolar Test', min: 0, max: 10, step: 0.1, def: 7 };
+
+const a = new Knob({ spec: specBipolar, bipolar: true, onInput: () => {} });
+const b = new Knob({ spec: specUnipolar, bipolar: false, onInput: () => {} });
+const c = new Knob({ spec: { ...specBipolar, def: -0.7 }, bipolar: true, showLabel: false, showValue: false, onInput: () => {} });
+const d = new Knob({ spec: specUnipolar, bipolar: false, labelPosition: 'bottom', onInput: () => {} });
+
+document.body.append(a.element, b.element, c.element, d.element);
+</script>
+</body>
+</html>
