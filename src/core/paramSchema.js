@@ -30,8 +30,16 @@ export const PARAM_SCHEMA = [
   { key: 'trigPerm', label: 'Rhythm Permutation', group: 'Rhythm', target: 'track', min: 0, max: 1, step: 0.001, def: 0 },
 
   // ---- Pitch --------------------------------------------------------------
-  { key: 'noteBias', label: 'Note Bias', group: 'Pitch', target: 'track', min: 1, max: 127, step: 0.5, def: 51 },
-  { key: 'noteSpread', label: 'Note Spread', group: 'Pitch', target: 'track', min: 0.1, max: 40, step: 0.1, def: 4 },
+  // Note bias/spread are integer-only and shown as note names / semitone counts
+  // (`display`, read by BiasSpreadSlider) rather than raw MIDI numbers -- a
+  // fractional pitch center or a fractional semitone count isn't meaningful
+  // here the way it is for, say, velocity. Spread's floor moved from the
+  // source's 0.1 down to 0: rounded to the nearest integer that's what the
+  // source's "never quite zero" floor already meant, and it usefully makes a
+  // fully deterministic pitch (no spread at all) reachable, which the source
+  // never allowed.
+  { key: 'noteBias', label: 'Note Bias', group: 'Pitch', target: 'track', min: 1, max: 127, step: 1, def: 51, display: 'note' },
+  { key: 'noteSpread', label: 'Note Spread', group: 'Pitch', target: 'track', min: 0, max: 40, step: 1, def: 4, display: 'semitones' },
   { key: 'scale', label: 'Scale', group: 'Pitch', target: 'track', min: 1, max: 10, step: 1, def: 1, display: 'scale' },
   { key: 'glide', label: 'Glide (lin | exp)', group: 'Pitch', target: 'track', min: -1, max: 1, step: 0.01, def: 0 },
   { key: 'noteLoop', label: 'Notes Loop', group: 'Pitch', target: 'track', type: 'toggle', def: false },
@@ -39,8 +47,12 @@ export const PARAM_SCHEMA = [
   { key: 'notePerm', label: 'Notes Permutation', group: 'Pitch', target: 'track', min: 0, max: 1, step: 0.001, def: 0 },
 
   // ---- Velocity -----------------------------------------------------------
-  { key: 'velBias', label: 'Velocity Bias', group: 'Velocity', target: 'track', min: 0.1, max: 1, step: 0.01, def: 0.55 },
-  { key: 'velSpread', label: 'Velocity Spread', group: 'Velocity', target: 'track', min: 0.1, max: 1, step: 0.01, def: 0.2 },
+  // Stored range is unchanged (0.1..1) -- that's what VELOCITY_DISTRIBUTION's
+  // formulas in distributions.js are calibrated against, ported directly from
+  // the source. `display: 'percent'` only changes what BiasSpreadSlider shows
+  // (55% rather than 0.55); the step is already exactly 1 percentage point.
+  { key: 'velBias', label: 'Velocity Bias', group: 'Velocity', target: 'track', min: 0.1, max: 1, step: 0.01, def: 0.55, display: 'percent' },
+  { key: 'velSpread', label: 'Velocity Spread', group: 'Velocity', target: 'track', min: 0.1, max: 1, step: 0.01, def: 0.2, display: 'percent' },
   { key: 'velLoop', label: 'Velocity Loop', group: 'Velocity', target: 'track', type: 'toggle', def: false },
   { key: 'velLoopLength', label: 'Velocity Loop Length', group: 'Velocity', target: 'track', min: 1, max: 32, step: 1, def: 1 },
 

@@ -6,6 +6,7 @@ import { Scheduler } from './sequencer/Scheduler.js';
 import { AudioEngine } from './audio/AudioEngine.js';
 import { UIController } from './ui/UIController.js';
 import { EuclidView } from './ui/EuclidView.js';
+import { BiasSpreadSlider } from './ui/BiasSpreadSlider.js';
 
 /**
  * Bootstrap. The only module that knows about all the others.
@@ -40,9 +41,30 @@ ui.renderDragNumbers(hubEl, EUCLID_KEYS);
 ui.renderGroups(document.getElementById('rhythm-controls'), ['Rhythm'], {
   skip: EUCLID_KEYS,
 });
+// Bias/spread pairs get one combined slider instead of two separate ones: the
+// handle is the bias, the wheel adjusts spread. See src/ui/BiasSpreadSlider.js.
+const BIAS_SPREAD_AXES = {
+  Pitch: { bias: 'noteBias', spread: 'noteSpread', title: 'Note' },
+  Velocity: { bias: 'velBias', spread: 'velSpread', title: 'Velocity' },
+  Modulation: { bias: 'modBias', spread: 'modSpread', title: 'Pluck Position' },
+};
+const sliderPrepend = {};
+for (const [group, axes] of Object.entries(BIAS_SPREAD_AXES)) {
+  const slider = new BiasSpreadSlider({
+    bus,
+    trackId: 0,
+    biasSpec: paramSpec(axes.bias),
+    spreadSpec: paramSpec(axes.spread),
+    title: axes.title,
+  });
+  sliderPrepend[group] = slider.element;
+}
+const sliderSkipKeys = Object.values(BIAS_SPREAD_AXES).flatMap((a) => [a.bias, a.spread]);
+
 ui.renderGroups(
   document.getElementById('controls'),
   PARAM_GROUPS.filter((g) => g !== 'Rhythm'),
+  { skip: sliderSkipKeys, prepend: sliderPrepend },
 );
 ui.attachReadout(document.getElementById('readout'));
 

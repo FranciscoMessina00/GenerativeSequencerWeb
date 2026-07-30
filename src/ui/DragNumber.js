@@ -18,12 +18,7 @@
  * element -- necessary here because the element is small and sits inside a circle.
  */
 
-function decimalsFor(step) {
-  if (!Number.isFinite(step) || step <= 0) return 0;
-  const text = String(step);
-  const dot = text.indexOf('.');
-  return dot === -1 ? 0 : text.length - dot - 1;
-}
+import { quantize } from './numberUtils.js';
 
 /** Travel, in pixels, for one full sweep of the parameter's range. */
 const FULL_RANGE_PX = 180;
@@ -40,7 +35,6 @@ export class DragNumber {
     this.spec = spec;
     this.format = format;
     this.onInput = onInput;
-    this.decimals = decimalsFor(spec.step);
     this.value = spec.def;
 
     this.element = document.createElement('div');
@@ -64,12 +58,7 @@ export class DragNumber {
   }
 
   #quantize(raw) {
-    const { min, max, step } = this.spec;
-    const snapped = Math.round(raw / step) * step;
-    const clamped = Math.min(max, Math.max(min, snapped));
-    // Snapping by multiplication leaves float dust (0.30000000000000004), which
-    // would show up directly in the readout.
-    return Number(clamped.toFixed(this.decimals));
+    return quantize(raw, this.spec.min, this.spec.max, this.spec.step);
   }
 
   #render() {

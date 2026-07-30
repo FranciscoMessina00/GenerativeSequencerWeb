@@ -290,3 +290,115 @@ input[type="range"]::-moz-range-thumb {
   cursor: pointer;
   flex-shrink: 0;
 }
+
+/* Compact variant of .dragnum, for the min/max controls flanking a
+   BiasSpreadSlider's track -- same interaction, smaller footprint so they read
+   as secondary controls next to the main handle. */
+.dragnum--compact { padding: 2px 5px; }
+.dragnum--compact .dragnum__value { font-size: 12px; }
+.dragnum--compact .dragnum__label { font-size: 7px; }
+
+/* ---- bias/spread slider ---- */
+
+.bsslider {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.bsslider__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+
+.bsslider__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.bsslider__readout {
+  font: 11px ui-monospace, monospace;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.bsslider__body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bsslider__track {
+  position: relative;
+  flex: 1;
+  height: 28px;
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.bsslider__track:focus-visible { outline: none; }
+
+/*
+ * Rail, band and handle all share the same vertical centre now -- stacked in
+ * z (paint order/DOM order) rather than offset into separate rows. The band
+ * sits behind the handle (it's added to the DOM first, and `pointer-events:
+ * none` keeps it from ever intercepting the handle's drag), so it reads as a
+ * highlighted zone the handle sits inside, not a separate strip underneath it.
+ * `top: 50%` + a negative top margin centers each one independent of the
+ * track's exact height, rather than pinning them to hand-measured pixel
+ * offsets that would drift out of sync if the height ever changed.
+ */
+.bsslider__rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  background: var(--line);
+  border-radius: 2px;
+}
+
+.bsslider__band {
+  position: absolute;
+  top: 50%;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 5px;
+  /* Solid, not translucent -- these are #6fb8e0 (--accent) pre-blended over the
+     track's #0e1116 background at the same 0.28/0.45 weights the old rgba()
+     used, so the look is unchanged, but the colour no longer depends on
+     whatever happens to render underneath it. */
+  background: #29404f;
+  pointer-events: none;
+  transition: background-color 0.12s;
+}
+
+.bsslider__track:hover .bsslider__band,
+.bsslider__track.is-dragging .bsslider__band {
+  background: #3a5c71;
+}
+
+.bsslider__handle {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  margin: -6.5px 0 0 -6.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #0e1116;
+  box-shadow: 0 0 0 1px rgba(111, 184, 224, 0.5);
+  pointer-events: none;
+  transition: box-shadow 0.12s;
+}
+
+.bsslider__track:hover .bsslider__handle,
+.bsslider__track.is-dragging .bsslider__handle,
+.bsslider__track:focus-visible .bsslider__handle {
+  box-shadow: 0 0 0 1px rgba(111, 184, 224, 0.85), 0 0 12px rgba(111, 184, 224, 0.6);
+}

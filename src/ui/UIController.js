@@ -41,15 +41,21 @@ export class UIController {
    * Rendering is split by target rather than done in one pass, because some
    * params live inside the step ring and the rest live in the side panel. Keys in
    * `skip` are omitted so they can be rendered elsewhere without appearing twice.
+   *
+   * `prepend` inserts a custom widget (e.g. a BiasSpreadSlider) at the top of a
+   * named group's panel, before its remaining sliders -- used where a group's
+   * bias and spread params are better driven by one combined control than by
+   * two separate sliders.
    */
-  renderGroups(container, groupNames, { skip = [] } = {}) {
+  renderGroups(container, groupNames, { skip = [], prepend = {} } = {}) {
     const skipped = new Set(skip);
 
     for (const group of groupNames) {
       const specs = PARAM_SCHEMA.filter(
         (s) => s.group === group && !skipped.has(s.key),
       );
-      if (specs.length === 0) continue;
+      const extra = prepend[group];
+      if (specs.length === 0 && !extra) continue;
 
       const section = document.createElement('section');
       section.className = 'group';
@@ -58,6 +64,7 @@ export class UIController {
       heading.textContent = group;
       section.appendChild(heading);
 
+      if (extra) section.appendChild(extra);
       for (const spec of specs) section.appendChild(this.#buildControl(spec));
       container.appendChild(section);
     }
