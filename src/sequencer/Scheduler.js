@@ -15,8 +15,14 @@ import { clampParam, defaultsFor } from '../core/paramSchema.js';
 export class Scheduler {
   /**
    * @param {object} opts
-   * @param {Ticker} [opts.ticker] wake-up source; injectable so tests can drive
-   *   `pump()` from a fake clock instead of waiting on real timers.
+   * @param {import('../core/EventBus.js').EventBus} opts.bus
+   * @param {() => number} opts.getCurrentTime the audio clock, in seconds
+   * @param {import('./Track.js').Track[]} opts.tracks
+   * @param {number} [opts.lookahead] seconds of steps to decide ahead of the clock
+   * @param {number} [opts.tickMs] wake-up interval
+   * @param {{start: Function, stop: Function, dispose: Function}} [opts.ticker]
+   *   wake-up source; injectable so tests can drive `pump()` from a fake clock
+   *   instead of waiting on real timers.
    */
   constructor({ bus, getCurrentTime, tracks, lookahead = 0.1, tickMs = 25, ticker }) {
     this.bus = bus;

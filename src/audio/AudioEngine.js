@@ -28,9 +28,10 @@ export class AudioEngine {
   async init() {
     if (this.ready) return;
 
-    this.context = new (window.AudioContext || window.webkitAudioContext)({
-      latencyHint: 'interactive',
-    });
+    // webkitAudioContext is the legacy Safari spelling, absent from the standard
+    // Window type; the cast keeps the fallback without pretending it is standard.
+    const Ctor = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
+    this.context = new Ctor({ latencyHint: 'interactive' });
 
     await Promise.all([
       this.context.audioWorklet.addModule('./src/audio/worklets/modal-processor.js'),
@@ -103,6 +104,15 @@ export class AudioEngine {
    * The step carries the note it decided on plus the note before it, because both
    * glides in this instrument ramp *from the previous value into the current one*
    * across the step.
+   *
+   * Note on per-track timbre, should a second track ever want its own string: the
+   * mode tables below are already built per note from explicit arguments, so this
+   * method only needs `this.params` to become a per-track lookup on `step.trackId`.
+   * The work is not here -- it is in the schema, where `modes`/`stiffness`/`decay`/
+   * `damping`/`pluckSoftness` would have to move from global to per-track scope,
+   * while `grainPitch`/`grainDryWet`/`masterGain` must stay global because there is
+   * one granulator and one fader. The 16-voice pool in the worklet stays shared
+   * either way; a global polyphony budget is the behaviour you want.
    */
   noteOn(step) {
     if (!this.ready || !step.triggered) return;

@@ -37,6 +37,9 @@ const WHEEL_COARSE_STEP = { percent: 0.01, semitones: 1 };
  */
 export class BiasSpreadSlider {
   /**
+   * @param {object} opts
+   * @param {import('../core/EventBus.js').EventBus} opts.bus
+   * @param {number} [opts.trackId]
    * @param {object} opts.biasSpec    paramSchema entry for the handle position
    * @param {object} opts.spreadSpec  paramSchema entry for the wheel-adjusted band
    * @param {string} opts.title       heading, e.g. "Note"
@@ -163,6 +166,31 @@ export class BiasSpreadSlider {
     this.bias = clampedBias;
     if (changed) this.#emitBias();
 
+    this.#updateVisuals();
+  }
+
+  /** The two schema keys this control owns. */
+  keys() {
+    return [this.biasSpec.key, this.spreadSpec.key];
+  }
+
+  /**
+   * Reflect an externally-changed value without emitting, so applying a broadcast
+   * cannot echo back onto the bus. Bias is also held inside the active range,
+   * which the range handles may have narrowed since.
+   */
+  setValue(key, value) {
+    if (key === this.biasSpec.key) {
+      this.bias = clamp(
+        quantize(value, this.biasSpec.min, this.biasSpec.max, this.biasSpec.step),
+        this.range.min,
+        this.range.max,
+      );
+    } else if (key === this.spreadSpec.key) {
+      this.spread = quantize(value, this.spreadSpec.min, this.spreadSpec.max, this.spreadSpec.step);
+    } else {
+      return;
+    }
     this.#updateVisuals();
   }
 

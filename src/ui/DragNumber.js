@@ -21,8 +21,10 @@ const FINE_DIVISOR = 8;
 
 export class DragNumber {
   /**
+   * @param {object} opts
    * @param {object} opts.spec     entry from paramSchema
-   * @param {Function} opts.format (value) => display string
+   * @param {(value: number) => string} opts.format
+   * @param {(value: number) => void} opts.onInput
    */
   constructor({ spec, format, onInput }) {
     this.spec = spec;

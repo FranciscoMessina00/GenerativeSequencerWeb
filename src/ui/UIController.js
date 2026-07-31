@@ -64,6 +64,31 @@ export class UIController {
     }
   }
 
+  /** The schema keys this controller owns a control for. */
+  keys() {
+    return [...this.inputs.keys(), ...this.dragNumbers.keys()];
+  }
+
+  /**
+   * Reflect an externally-changed value. Updates the control and its readout
+   * without emitting, so applying a broadcast cannot echo back onto the bus.
+   */
+  setValue(key, value) {
+    const spec = PARAM_SCHEMA.find((s) => s.key === key);
+    if (!spec) return;
+
+    this.dragNumbers.get(key)?.setValue(value);
+
+    const input = this.inputs.get(key);
+    if (input) {
+      if (spec.type === 'toggle') input.checked = Boolean(value);
+      else input.value = String(value);
+    }
+
+    const label = this.valueLabels.get(key);
+    if (label) label.textContent = this.#formatValue(spec, value);
+  }
+
   /**
    * Render the given keys as drag-numbers, with no group chrome -- for the
    * Euclidean params inside the ring, where slider tracks would not fit and would

@@ -12,8 +12,10 @@ import { permute, permutationIndex } from './permute.js';
  */
 export class HistoryBuffer {
   /**
+   * @param {object} opts
+   * @param {number} [opts.size]      slots in the register
    * @param {number} opts.writeIndex  where fresh values land (15 for triggers, 31 otherwise)
-   * @param {Function} opts.fill      () => initial value for each slot
+   * @param {() => any} opts.fill     initial value for each slot
    */
   constructor({ size = 32, writeIndex, fill }) {
     this.size = size;

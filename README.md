@@ -15,7 +15,9 @@ index.html
         ├─ core/               ← Infrastructure
         │   ├─ EventBus.js     ←   Pub/sub event system
         │   ├─ rng.js          ←   Seedable PRNG (mulberry32)
-        │   └─ paramSchema.js  ←   Declarative parameter definitions
+        │   ├─ paramSchema.js  ←   Declarative parameter definitions
+        │   ├─ ParamStore.js   ←   Authoritative parameter state
+        │   └─ presets.js      ←   Factory patch loading
         │
         ├─ sequencer/           ← Sequencing engine
         │   ├─ Scheduler.js    ←   Lookahead audio clock scheduler
@@ -67,6 +69,95 @@ The scheduler decides each step ~100 ms ahead of the audio clock and stamps it
 with an explicit `audioTime`, so timer jitter shifts *when a note is decided*,
 never *when it sounds*.
 
+## Parameter flow
+
+`ParamStore` holds the only authoritative copy of every parameter and is the only
+thing that writes to the engines. Two events keep that one-directional:
+
+| Event | Meaning | Emitted by |
+|---|---|---|
+| `param:change` | a *request* to change a value | controls, presets, anything else |
+| `param:changed` | the *committed* value, after normalising | the store, only |
+
+Controls emit the first and subscribe to the second, applying it through a
+`setValue()` that never re-emits — so a control's own gesture returns to it as an
+idempotent redraw rather than a feedback loop, and a preset can move every control
+on screen by doing nothing but writing to the store.
+
+`target` sets scope: `track` params are per-track, `voice` and `transport` are
+global.
+
+## Patches
+
+Patches are **read-only and ship with the instrument**. Nothing is written to the
+browser — no `localStorage`, no cookies — so the sequencer behaves identically for
+every visitor, on every origin it is served from, with no state to go stale.
+
+The **Patch** control in the header picks one and loads it.
+
+### Where they live
+
+[`presets/factory.json`](presets/factory.json), committed to the repo and fetched
+once at startup:
+
+```json
+{
+  "version": 1,
+  "presets": [
+    { "name": "Default", "patch": { "version": 1, "seed": 424242, "global": {...}, "tracks": [{...}] } }
+  ]
+}
+```
+
+Adding a patch means appending to that array. No code change, no build step.
+
+`Default` is generated from the schema defaults rather than typed by hand, and a
+test asserts it still matches them — so changing a `def` in `paramSchema.js` without
+regenerating fails the suite instead of silently shipping a stale patch.
+
+### What a patch contains
+
+Every parameter, scoped the way `target` scopes them, **plus the RNG seed**. The
+seed is the part worth understanding: the generators are stochastic, so settings
+alone restore the same *instrument* but a different *performance*. With the seed, a
+patch replays note for note — which is why the RNG is seedable at all.
+
+### Loading
+
+`ParamStore.load()` writes each value into the store, the store announces each as
+`param:changed`, and **every control on screen follows**. The preset code knows
+nothing about the UI.
+
+Values are re-normalised through the schema on the way in, so an out-of-range or
+hand-edited patch gets clamped and snapped rather than reaching the audio engine;
+unknown keys are ignored so older patches still load; and a malformed entry is
+skipped rather than taking the rest of the set down with it. If the file is missing
+entirely the dropdown reads `unavailable` and the instrument still plays, because it
+boots on the same defaults the shipped patch holds.
+
+### Authoring a new one
+
+Dial the instrument in, then from the devtools console:
+
+```js
+__seq.presets.toJSON(__seq.store.snapshot(__seq.rng.seed))
+```
+
+and paste the result into `presets/factory.json` as another
+`{ "name": "...", "patch": { ... } }` entry.
+
+## Deploying
+
+Static, so GitHub Pages serves the repo as-is — Settings → Pages → deploy from
+branch, root. Every asset reference is document-relative, so it works unchanged
+under a project subpath like `/WebGenerativeSequencer/`.
+
+[`_config.yml`](_config.yml) keeps `test/`, `types/`, `jsconfig.json` and
+`package.json` off the published site. That stops them being reachable at a URL; it
+does not make them private — in a public repo they are still readable on GitHub,
+which is where they belong. Read the comments in that file before adding
+`.nojekyll`, which would disable the exclusion.
+
 ## Physical model
 
 The string voice is additive-modal: one two-pole resonator per mode, struck by a
@@ -106,7 +197,8 @@ darker tail of a real string; `damping = 0` makes all modes decay together.
 | `src/sequencer/` | Clock scheduling, track generators, rhythm & pitch logic |
 | `src/audio/` | AudioContext management, modal string model, AudioWorklets |
 | `src/ui/` | Canvas GUI, custom controls (sliders, drag-numbers, dropdowns) |
-| `test/` | Node.js native test suite (7 test files) |
+| `presets/` | Factory patches, fetched at startup |
+| `test/` | Node.js native test suite |
 | `styles/` | Application CSS |
 
 ## Run
@@ -118,8 +210,19 @@ npm run serve    # Python HTTP server on port 8080
 ## Test
 
 ```bash
-npm test         # Node native test runner
+npm test         # Node native test runner, 102 tests, no dependencies
 ```
+
+## Types
+
+`jsconfig.json` turns on `checkJs`, so an editor type-checks the JSDoc annotations
+with nothing installed. For a command-line or CI gate:
+
+```bash
+npm i -D typescript && npm run typecheck
+```
+
+Nothing is ever emitted — this is checking, not building.
 
 The worklets cannot run under Node, and a runtime error inside one is silent —
 the node simply outputs zeros. `test/browser/selftest.html` therefore renders the

@@ -6,6 +6,8 @@
   "private": true,
   "scripts": {
     "test": "node --test \"test/*.test.js\"",
-    "serve": "python3 -m http.server 8080"
+    "serve": "python3 -m http.server 8080",
+    "//typecheck": "Editors read jsconfig.json with no install. This is for a CLI or CI gate, and needs `npm i -D typescript` first.",
+    "typecheck": "tsc -p jsconfig.json"
   }
 }

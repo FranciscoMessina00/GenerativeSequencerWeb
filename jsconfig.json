@@ -1,0 +1,31 @@
+{
+  "//": [
+    "Type checking without a build step. VS Code reads this automatically and will",
+    "report errors inline, so no dependency is needed to benefit from it.",
+    "For a command-line or CI gate, `npm i -D typescript` and run `npx tsc -p .`;",
+    "nothing here needs to change for that, and nothing is ever emitted.",
+    "",
+    "strict is off deliberately. It is the honest setting for JSDoc-annotated code",
+    "of this age -- strictNullChecks alone reports every lazily-initialised field.",
+    "The checks enabled below are the ones that catch real mistakes in this codebase:",
+    "wrong param names, misspelled properties, bad arity.",
+    "",
+    "test/ is excluded on purpose. Its imports of node:test and node:assert would",
+    "need @types/node, and the tests are already verified the stronger way -- by",
+    "running them."
+  ],
+  "compilerOptions": {
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*.js", "types/**/*.d.ts"]
+}

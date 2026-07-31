@@ -174,3 +174,6 @@ class GranulatorProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('granulator-processor', GranulatorProcessor);
+
+// See the note in modal-processor.js: module scope, no imports.
+export {};

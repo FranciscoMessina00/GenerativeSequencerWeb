@@ -309,3 +309,8 @@ class ModalProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('modal-processor', ModalProcessor);
+
+// addModule() evaluates this file as a module script, so this is legal -- and it is
+// what keeps the top-level constants in their own scope rather than colliding with
+// the other worklet's. Nothing is imported; the file stays self-contained.
+export {};

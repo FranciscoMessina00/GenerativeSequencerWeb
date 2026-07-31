@@ -27,6 +27,9 @@ function buildModeIcon(exponential) {
  */
 export class GlideControl {
   /**
+   * @param {object} opts
+   * @param {import('../core/EventBus.js').EventBus} opts.bus
+   * @param {number} [opts.trackId]
    * @param {object} opts.amountSpec paramSchema entry for the unipolar amount
    * @param {object} opts.modeSpec   paramSchema entry for the mode toggle
    */
@@ -59,6 +62,25 @@ export class GlideControl {
 
     root.append(this.amountControl.element, this.modeButton);
     this.element = root;
+  }
+
+  /** The two schema keys this control owns. */
+  keys() {
+    return [this.amountSpec.key, this.modeSpec.key];
+  }
+
+  /**
+   * Reflect an externally-changed value without emitting, so applying a broadcast
+   * cannot echo back onto the bus.
+   */
+  setValue(key, value) {
+    if (key === this.amountSpec.key) {
+      this.amountControl.setValue(value);
+    } else if (key === this.modeSpec.key) {
+      this.exponential = Boolean(value);
+      this.modeButton.setAttribute('aria-pressed', String(this.exponential));
+      this.#renderIcon();
+    }
   }
 
   #renderIcon() {

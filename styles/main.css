@@ -23,18 +23,36 @@ body {
   font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+/* Grid rather than flex with space-between, so the patch group is centred on the
+   *bar* instead of on the leftover space between its neighbours. Those neighbours
+   are not the same width -- the transport runs about 32px wider than the title --
+   and space-between splits that difference in half, which pushed the patch ~16px
+   left of true centre. Equal `1fr` side columns remove the dependency entirely. */
 header {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   gap: 12px;
   align-items: center;
-  justify-content: space-between;
   padding: 12px 18px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   position: sticky;
   top: 0;
   z-index: 10;
+}
+
+/* Column 3 fills its half, so the buttons are pinned to the right edge. */
+header > .transport { justify-self: end; }
+
+/* Below this the three groups no longer fit side by side (their combined
+   min-content is ~820px), and a grid would overflow rather than wrap -- so stack
+   them explicitly instead. */
+@media (max-width: 860px) {
+  header {
+    grid-template-columns: 1fr;
+    row-gap: 10px;
+  }
+  header > .transport { justify-self: start; }
 }
 
 h1 { font-size: 15px; margin: 0; font-weight: 600; }
@@ -469,6 +487,67 @@ input[type="range"]::-moz-range-thumb {
   border-color: var(--accent);
   outline: none;
 }
+
+/* ---- patch: save & recall the whole instrument state ---- */
+
+/* Sits between the title and the transport, so the header reads left to right as
+   what this is / what is loaded / whether it is playing. */
+.patch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.patch__label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: 2px;
+}
+
+/* Fixed width, not min-width. Every message is transient, so anything that grows
+   with the text would shove the transport sideways and back again a second later --
+   and the Play button must never move under the cursor. Messages are written to fit;
+   the ellipsis is the guard if one ever isn't. */
+.patch__status {
+  font: 11px ui-monospace, monospace;
+  color: var(--muted);
+  width: 15ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.patch select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  /* min-width so the loading and unavailable states still read as a real control. */
+  min-width: 13ch;
+  max-width: 20ch;
+}
+.patch select:hover,
+.patch select:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+.patch select:disabled,
+.patch button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+.patch select:disabled:hover,
+.patch button:disabled:hover { border-color: var(--line); }
+
+/* The header is tight with three groups in it, so patch buttons trade some padding
+   for room; the transport keeps its full size since it is the primary control. */
+.patch button { padding: 6px 10px; }
 
 /* ---- glide control: drag-number + mode-toggle icon ---- */
 

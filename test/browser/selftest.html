@@ -17,6 +17,25 @@
  * numbers rather than as unexplained silence.
  *
  * Serve the project root and open /test/browser/selftest.html.
+ *
+ * ---------------------------------------------------------------------------
+ * KNOWN UNRELIABLE -- read numbers here as evidence, never as pass/fail.
+ *
+ * Each check posts its note-on over the worklet's message port and then renders
+ * offline, which runs as fast as the CPU allows -- fast enough to pass the note's
+ * start frame before the message has crossed to the audio thread. A check that
+ * loses that race reports 0.0000 or NaN for a voice that is in fact working, and
+ * the same build gives different results run to run.
+ *
+ * The yield in render() below narrows the window but does not close it: a
+ * macrotask on this thread guarantees nothing about the audio thread's queue.
+ *
+ * A real fix needs a delivery barrier -- either a ping/pong handshake with the
+ * processor, or passing the note through `processorOptions` at node construction,
+ * which is delivered as part of creating the node. Both mean changing production
+ * DSP code for testability, so it is left as a deliberate decision rather than
+ * bolted on. Until then, prefer the Node suite (`npm test`) as the gate.
+ * ---------------------------------------------------------------------------
  */
 const lines = [];
 const log = (s) => { lines.push(s); document.getElementById('out').textContent = lines.join('\n'); };
@@ -48,6 +67,10 @@ async function render(seconds, setup, { dryWet = -1, grainPitch = 1 } = {}) {
   gran.parameters.get('grainPitch').value = grainPitch;
   modal.connect(gran); gran.connect(ctx.destination);
   setup(modal, ctx);
+  // Yield before rendering, so posted note-on messages have a chance to reach the
+  // audio thread first. Helps, but does NOT fully fix the race -- see the banner
+  // at the top of this file.
+  await new Promise((resolve) => setTimeout(resolve, 0));
   const rendered = await ctx.startRendering();
   return rendered.getChannelData(0);
 }

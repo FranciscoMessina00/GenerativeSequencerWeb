@@ -5,8 +5,10 @@
  */
 export class Dropdown {
   /**
+   * @param {object} opts
    * @param {object} opts.spec paramSchema entry
    * @param {{value:number,label:string}[]} opts.options
+   * @param {(value: number) => void} opts.onInput
    */
   constructor({ spec, options, onInput }) {
     this.spec = spec;
@@ -38,6 +40,11 @@ export class Dropdown {
 
     root.append(label, this.selectEl);
     this.element = root;
+  }
+
+  /** The single schema key this control owns. */
+  keys() {
+    return [this.spec.key];
   }
 
   /** Set from outside without firing onInput -- for reflecting external changes. */
