@@ -225,15 +225,27 @@ and paste the result into `presets/factory.json` as another
 
 ## Deploying
 
-Static, so GitHub Pages serves the repo as-is — Settings → Pages → deploy from
-branch, root. Every asset reference is document-relative, so it works unchanged
-under a project subpath like `/WebGenerativeSequencer/`.
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) publishes to GitHub
+Pages whenever a release is published — not on every push to `master`, so the site
+only moves when that is a deliberate act — or on demand from the Actions tab for a
+redeploy with no new release behind it. It runs the test suite and the type-check
+first, then stages only `index.html`, `src/`, `styles/` and
+`presets/` into the published artifact — an allow-list, so a new file dropped at the
+repo root later is private by default rather than needing to be remembered as another
+exclusion. `test/`, `types/`, `jsconfig.json` and `package.json` are never copied in,
+which keeps them off the published site; that is not the same as private — in a
+public repo they are still readable on GitHub, which is where they belong.
 
-[`_config.yml`](_config.yml) keeps `test/`, `types/`, `jsconfig.json` and
-`package.json` off the published site. That stops them being reachable at a URL; it
-does not make them private — in a public repo they are still readable on GitHub,
-which is where they belong. Read the comments in that file before adding
-`.nojekyll`, which would disable the exclusion.
+This deploys through Actions rather than the classic Jekyll build, on purpose:
+several source files carry `{{` inside JSDoc typedefs (e.g.
+`@typedef {{ name: string }}`), which Jekyll's Liquid engine would try to parse as a
+template expression and corrupt. An Actions deployment uploads the artifact as-is and
+never runs Jekyll, so that risk does not apply here.
+
+One-time setup the workflow depends on: **Settings → Pages → Source → GitHub
+Actions** (not "Deploy from a branch"). Every asset reference in the app is
+document-relative, so the site works unchanged under a project subpath like
+`/WebGenerativeSequencer/`.
 
 ## Physical model
 

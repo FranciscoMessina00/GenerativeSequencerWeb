@@ -1,0 +1,83 @@
+# Publishes the site to GitHub Pages via an Actions-managed deployment rather than
+# the classic Jekyll build. That distinction matters here specifically: several
+# source files carry `{{` inside JSDoc typedefs (e.g. `@typedef {{ name: string }}`),
+# which Jekyll's Liquid engine would try to parse as a template expression and
+# corrupt. An Actions deployment uploads the artifact as-is and never runs Jekyll, so
+# that risk does not exist on this path -- it is not something this workflow has to
+# guard against.
+#
+# One-time repo setup this workflow depends on: Settings -> Pages -> Source ->
+# "GitHub Actions" (not "Deploy from a branch"). Until that is set, a published
+# release will run this workflow but nothing will actually be served.
+name: Deploy to GitHub Pages
+
+on:
+  # Publishing is a deliberate act, not a side effect of pushing to master: the site
+  # goes live when a release is published, checked out at the tag that release points
+  # to, and not before.
+  release:
+    types: [published]
+  # ...or on demand from the Actions tab, for a redeploy with no new release behind it.
+  workflow_dispatch:
+
+# id-token is what actions/deploy-pages uses to authenticate the deployment; pages
+# write is the actual publish permission.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time, and never cancel one that is already live-publishing
+# midway through -- matches GitHub's own recommended Pages workflow template.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Run tests
+        run: npm test
+
+      - name: Type-check
+        run: |
+          npm install --no-save typescript@5
+          npm run typecheck
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # An allow-list, not an exclude-list: only what is named here ever reaches the
+      # published site, so a new file added at the repo root later (a stray config, a
+      # note-to-self) is private by default instead of needing to be remembered as
+      # another exclusion.
+      - name: Stage the public site
+        run: |
+          mkdir _site
+          cp index.html _site/
+          cp -r src styles presets _site/
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
