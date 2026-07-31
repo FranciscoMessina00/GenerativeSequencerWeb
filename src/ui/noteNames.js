@@ -1,12 +1,9 @@
 /**
  * MIDI note number -> scientific pitch notation name, e.g. 60 -> "C4".
  *
- * Uses the convention where middle C (MIDI 60) is C4 and concert pitch A440
- * (MIDI 69) is A4 -- the mapping Scientific Pitch Notation itself defines, and
- * the one most DAWs (Ableton Live, Logic, FL Studio) show by default. A
- * minority of tools (some older Yamaha/Roland gear, some Cubase
- * configurations) instead call MIDI 60 "C3" -- if this needs to match one of
- * those, subtract one more from `octave` below.
+ * Middle C (MIDI 60) is C4, as Scientific Pitch Notation defines and as most DAWs
+ * display. Some gear calls MIDI 60 "C3" instead -- to match that, subtract one more
+ * from `octave` below.
  */
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];

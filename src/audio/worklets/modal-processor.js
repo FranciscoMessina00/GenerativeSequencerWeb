@@ -1,19 +1,10 @@
 /**
- * Modal string voice bank.
+ * Modal string voice bank. Each voice is a set of two-pole resonators, one per
+ * mode, struck by a shaped impulse. Mode tables come from `modal/modalModel.js`
+ * with the note-on message, so this file is only the recursion, the voice pool,
+ * and the ramps -- no physics is duplicated here.
  *
- * Each voice is a set of two-pole resonators, one per mode, struck by a short
- * shaped noise burst. The mode tables (frequency ratios, gains, decay times) are
- * computed on the main thread by `src/audio/modal/modalModel.js` and handed over
- * with the note-on message, so no physics is duplicated in here -- this file is
- * only the recursion, the voice pool, and the ramps.
- *
- * A resonator replaces the source's `SinOsc.ar(freq, 0, amp).sum`. The modes are
- * the same; the difference is that they ring by themselves instead of being
- * driven, which is what makes the mode count cheap and gives each mode its own
- * decay.
- *
- * AudioWorkletGlobalScope has no module loader, so this file must stay
- * self-contained -- no imports.
+ * AudioWorkletGlobalScope has no module loader, so this must stay self-contained.
  */
 
 const MAX_VOICES = 16;
@@ -88,10 +79,9 @@ class ModalProcessor extends AudioWorkletProcessor {
   }
 
   /**
-   * Pick a voice. Free voices first; otherwise steal the quietest, breaking ties
-   * toward the oldest. Stealing by amplitude rather than purely by age matters
-   * for a plucked string, where a note that has already decayed away is a much
-   * better sacrifice than a recent one.
+   * Pick a voice: free ones first, otherwise steal the quietest and break ties
+   * toward the oldest. By amplitude rather than age, because for a plucked string
+   * an already-decayed note is a far better sacrifice than a recent one.
    */
   #allocateVoice() {
     let best = null;
@@ -144,15 +134,12 @@ class ModalProcessor extends AudioWorkletProcessor {
     v.modDone = 0;
     v.modExp = Boolean(msg.modExponential);
 
-    // Excitation: a unit impulse through a one-pole lowpass.
-    //
-    // Deliberately deterministic. A noise burst is the usual cheap pluck, but
-    // noise has a random spectrum, so each mode would be excited by whatever the
-    // noise happened to contain at its frequency -- which throws away the whole
-    // point of computing B_n. An impulse excites every mode equally, so the
-    // spectrum is exactly the model's, and the one-pole gives the attack a
-    // controllable softness (its rolloff is the only thing shaping the mode
-    // balance, and it does so smoothly and predictably).
+    // Excitation: a unit impulse through a one-pole lowpass, deliberately
+    // deterministic. A noise burst is the usual cheap pluck, but its spectrum is
+    // random, so each mode would be excited by whatever the noise happened to
+    // contain there -- throwing away the point of computing per-mode amplitudes.
+    // An impulse excites every mode equally, so the spectrum is exactly the
+    // model's, and the one-pole's rolloff becomes the sole control over softness.
     v.exciteRemaining = 1;
     v.exciteAmp = msg.velocity;
     v.exciteLpState = 0;
@@ -188,17 +175,16 @@ class ModalProcessor extends AudioWorkletProcessor {
       const r = v.r[i];
       v.a1[i] = -2 * r * cosw;
       v.a2[i] = r * r;
-      // Struck-resonator normalisation. The impulse response of this filter is
+      // Struck-resonator normalisation. This filter's impulse response is
       //     h[n] = b0 * r^n * sin((n+1)w) / sin(w)
-      // so setting b0 = sin(w) makes the envelope start at exactly 1, and the
-      // mode's audible amplitude becomes precisely its gain -- the paper's B_n.
+      // so b0 = sin(w) makes the envelope start at exactly 1 and each mode's
+      // audible amplitude becomes precisely its gain B_n.
       //
-      // NOT the steady-state unity-peak-magnitude normalisation (b0 = |D(w)|).
-      // That one is correct for a resonator driven continuously at resonance, but
-      // these modes are struck once and left to ring: peak magnitude response
-      // scales with Q, so normalising by it would make each mode's amplitude
-      // depend on its own decay time, and the per-mode damping would silently
-      // rewrite the spectrum the model asked for.
+      // NOT unity-peak-magnitude normalisation (b0 = |D(w)|), which is right for a
+      // resonator driven continuously at resonance. These modes are struck once
+      // and left to ring, and peak magnitude scales with Q -- so normalising by it
+      // would tie each mode's amplitude to its own decay time, letting per-mode
+      // damping silently rewrite the spectrum the model asked for.
       v.norm[i] = sinw;
     }
   }
@@ -209,8 +195,6 @@ class ModalProcessor extends AudioWorkletProcessor {
    */
   #advanceGlide(v) {
     const t = Math.min(1, v.glideDone / v.glideTotal);
-    // Negative glide used SC's Line.kr (linear), positive used XLine.kr
-    // (exponential) -- see TriggerWithGlide.scd:387-393.
     const f0 = v.glideExp
       ? v.f0From * Math.pow(v.f0To / v.f0From, t)
       : v.f0From + (v.f0To - v.f0From) * t;
@@ -218,20 +202,13 @@ class ModalProcessor extends AudioWorkletProcessor {
   }
 
   /**
-   * Advance the plucking-position ramp.
+   * Advance the plucking-position ramp. What interpolates is m itself; its
+   * position between the endpoints becomes the blend weight between the two gain
+   * vectors the main thread supplied.
    *
-   * In the source the ramp is applied to the `modulation` control itself, and the
-   * mode amplitudes are a UGen graph downstream of it -- so what actually
-   * interpolates is m, and the gains follow from it. That trajectory is
-   * reproduced exactly here: m is ramped (linearly or exponentially per the sign
-   * of the knob), and its position between the endpoints becomes the blend weight
-   * between the two gain vectors the main thread supplied.
-   *
-   * Blending the endpoint gain vectors is a linear approximation of re-deriving
-   * B_n from the ramped m. B_n is smooth in m, the ramp lasts under one step, and
-   * the alternative would mean duplicating the amplitude formula in here -- so
-   * the approximation buys a single source of truth for the physics at a cost of
-   * a fraction of a dB mid-ramp.
+   * Blending endpoints is a linear approximation of re-deriving B_n from the
+   * ramped m. B_n is smooth in m and the ramp lasts under one step, so it costs a
+   * fraction of a dB mid-ramp and avoids duplicating the amplitude formula here.
    */
   #advanceModRamp(v) {
     const t = Math.min(1, v.modDone / v.modTotal);
@@ -322,10 +299,9 @@ class ModalProcessor extends AudioWorkletProcessor {
       this.#renderVoice(v, out, offset, out.length - offset);
     }
 
-    // Intentionally not limited here. The granulator downstream is the last DSP
-    // stage and owns the single saturation point in the chain -- its wet path can
-    // add coherent gain, so clipping here would both double-distort and fail to
-    // catch the actual peak.
+    // Intentionally not limited here: the granulator downstream owns the chain's
+    // single saturation point, and its wet path adds coherent gain, so clipping
+    // here would double-distort and still miss the real peak.
     //
     // Keep the node alive even when silent; it is a permanent source.
     return true;

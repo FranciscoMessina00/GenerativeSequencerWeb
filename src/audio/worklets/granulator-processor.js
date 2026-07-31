@@ -1,45 +1,38 @@
 /**
- * Real-time granulator, ported from the `GrainBuf` section of the source's
- * SynthDef (`TriggerWithGlide.scd:209-223`).
+ * Real-time granulator. The string signal streams into a 3-second circular buffer;
+ * grains fire from a Poisson process and read a fixed distance behind the write
+ * head, so this is a live effect on just-produced material, not a sampler.
  *
- * The string signal is written continuously into a 3-second circular buffer.
- * Grains fire from a Poisson process and each reads from a fixed distance behind
- * the write head, so the granulator always works on material the string has just
- * produced -- it is a live effect, not a sampler.
- *
- * Dry/wet lives inside this processor rather than as a parallel Web Audio path,
- * so the dry signal stays sample-aligned with the wet one. Splitting the graph
+ * Dry/wet lives inside the processor rather than as a parallel Web Audio path, so
+ * the dry signal stays sample-aligned with the wet one -- splitting the graph
  * would need a compensating delay on the dry side to avoid comb filtering.
  *
  * Self-contained: AudioWorkletGlobalScope has no module loader.
  */
 
 const BUFFER_SECONDS = 3;
-const MAX_GRAINS = 64; // the source's maxGrains
-const GRAIN_DENSITY = 16; // the source's Dust.kr(16), grains per second
-const READ_DELAY = 0.2; // the source's ptrdelay, seconds behind the write head
-const MAX_GRAIN_DUR = 0.3; // the source's min(0.3, ...) ceiling
+const MAX_GRAINS = 64;
+const GRAIN_DENSITY = 16; // grains per second
+const READ_DELAY = 0.2; // seconds behind the write head
+const MAX_GRAIN_DUR = 0.3;
 const TWO_PI = Math.PI * 2;
 
 /** Below this level the limiter is bypassed entirely. */
 const KNEE = 0.8;
 
 /**
- * Soft-knee limiter: identity below KNEE, asymptotic to +/-1 above it.
+ * Soft-knee limiter: identity below KNEE, asymptotic to +/-1 above it. The only
+ * saturation stage in the chain, placed here as the last DSP node before the
+ * master fader.
  *
- * This is the only saturation stage in the chain, and it lives here because this
- * is the last DSP node before the master fader. It matters more than it looks:
- * at grain pitch 1 every grain reads the same delayed signal at the same speed,
- * so they sum *coherently* -- with ~3 grains overlapping on average the wet path
- * reaches roughly 1.7x the dry level. GrainBuf in the original does not normalise
- * for that either, so the gain is kept and the peak is caught here instead of
- * being left to hard-clip in the output device.
+ * It earns its place: at grain pitch 1 every grain reads the same delayed signal
+ * at the same speed, so grains sum *coherently* and ~3 overlapping ones push the
+ * wet path to roughly 1.7x dry. That gain is wanted, so the peak is caught here
+ * rather than left to hard-clip in the output device.
  *
- * The knee is what makes it safe to sit on the dry path. A plain cubic soft clip
- * would shave a few percent off *every* sample, so a fully-dry setting would no
- * longer be a true bypass. This form is exactly the identity below KNEE and
- * C1-continuous across it, so normal-level signals pass through untouched and
- * only genuine overshoot is bent.
+ * The knee is what makes it safe on the dry path: a plain cubic soft clip would
+ * shave every sample, so fully-dry would stop being a true bypass. This form is
+ * exactly the identity below KNEE and C1-continuous across it.
  */
 function softClip(x) {
   const a = x < 0 ? -x : x;
@@ -54,7 +47,7 @@ class GranulatorProcessor extends AudioWorkletProcessor {
     return [
       // Grain playback rate, i.e. pitch. 1 = unshifted.
       { name: 'grainPitch', defaultValue: 1, minValue: 0.5, maxValue: 2, automationRate: 'k-rate' },
-      // XFade2 pan: -1 is fully dry, +1 fully wet.
+      // Equal-power crossfade position: -1 fully dry, +1 fully wet.
       { name: 'dryWet', defaultValue: -1, minValue: -1, maxValue: 1, automationRate: 'k-rate' },
     ];
   }
@@ -79,7 +72,7 @@ class GranulatorProcessor extends AudioWorkletProcessor {
     this.smoothing = 1 - Math.exp(-1 / (0.005 * sampleRate)); // ~5 ms
   }
 
-  /** Cubic (Catmull-Rom) read, matching the source's `interp: 4`. */
+  /** Cubic (Catmull-Rom) interpolated read, so pitch-shifted grains stay clean. */
   #readCubic(position) {
     const len = this.bufferLength;
     const buf = this.buffer;
@@ -106,13 +99,13 @@ class GranulatorProcessor extends AudioWorkletProcessor {
         break;
       }
     }
-    // At 16 grains/s and up to 0.3 s each, ~5 overlap on average; hitting the
-    // 64-grain ceiling means dropping this grain, exactly as maxGrains does.
+    // At 16 grains/s and up to 0.3 s each, ~5 overlap on average, so the 64-grain
+    // ceiling is only reached pathologically -- drop the grain rather than steal.
     if (slot === -1) return;
 
-    // dur = min(0.3, ptrdelay / rate) is what keeps a fast grain from overtaking
-    // the write head: at rate r it consumes r seconds of buffer per second of
-    // output, so starting 0.2 s back it arrives at the head precisely as it ends.
+    // Capping duration at READ_DELAY / rate is what keeps a fast grain from
+    // overtaking the write head: at rate r it consumes r seconds of buffer per
+    // second of output, so starting 0.2 s back it reaches the head as it ends.
     const duration = Math.min(MAX_GRAIN_DUR, READ_DELAY / rate);
     const length = Math.max(2, Math.round(duration * sampleRate));
 
@@ -132,14 +125,13 @@ class GranulatorProcessor extends AudioWorkletProcessor {
     const rate = parameters.grainPitch[0];
     const pan = parameters.dryWet[0];
 
-    // Equal-power crossfade, as SC's XFade2: -1 all dry, +1 all wet, and both
-    // legs at 1/sqrt(2) in the middle so perceived loudness stays constant.
+    // Equal-power crossfade: -1 all dry, +1 all wet, and both legs at 1/sqrt(2)
+    // in the middle so perceived loudness stays constant across the sweep.
     const angle = ((pan + 1) * Math.PI) / 4;
     const targetDry = Math.cos(angle);
     const targetWet = Math.sin(angle);
 
-    // Probability of a grain onset per sample -- a Poisson process with the same
-    // mean rate as Dust.
+    // Probability of a grain onset per sample -- a Poisson process at GRAIN_DENSITY.
     const spawnProbability = GRAIN_DENSITY / sampleRate;
     const len = this.bufferLength;
 
@@ -158,7 +150,7 @@ class GranulatorProcessor extends AudioWorkletProcessor {
 
         const age = this.grainAge[g];
         const grainLength = this.grainLen[g];
-        // Hann window, the source's `envbufnum: -1`.
+        // Hann window, so grains fade in and out instead of clicking.
         const window = 0.5 * (1 - Math.cos((TWO_PI * age) / grainLength));
         wet += this.#readCubic(this.grainPos[g]) * window;
 

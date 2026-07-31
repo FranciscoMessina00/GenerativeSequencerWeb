@@ -1,8 +1,4 @@
-/**
- * The ten scales offered by the instrument, in the source's knob order
- * (`TriggerWithGlide.scd:50-61`, labels from `Vista.pde:315-346`), plus a port
- * of SuperCollider's `nearestInScale` quantisation.
- */
+/** The ten scales offered by the instrument, plus the quantiser that snaps to them. */
 
 export const SCALES = [
   { id: 1, name: 'Chromatic', degrees: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] },
@@ -24,9 +20,8 @@ export function scaleById(id) {
 }
 
 /**
- * Port of SC's `nearestInList`: nearest element of a sorted ascending list.
- * Ties resolve downward (SC uses `<=` when comparing the two neighbours), which
- * matters for chromatic quantisation of exact half-steps.
+ * Nearest element of a sorted ascending list. Ties resolve downward, which is
+ * what makes chromatic quantisation of an exact half-step deterministic.
  */
 export function nearestInList(value, list) {
   // Index of the first element strictly greater than `value`.
@@ -47,12 +42,10 @@ export function nearestInList(value, list) {
 /**
  * Quantise a (possibly fractional) MIDI note to the given scale.
  *
- * Faithful to SC: the octave is taken first and the remainder is snapped within
- * that octave, so quantisation deliberately does NOT wrap across the octave
- * boundary. In major pentatonic, 11.6 snaps down to 9 rather than up to the 12
- * of the next octave. This asymmetry is audible -- it biases notes near the top
- * of an octave downward -- and is kept because it is part of how the original
- * instrument sounds.
+ * The octave is taken first and the remainder snapped inside it, so quantisation
+ * deliberately does NOT wrap across the octave boundary: in major pentatonic
+ * 11.6 snaps down to 9 rather than up to the next octave's 12. The asymmetry is
+ * audible -- notes near the top of an octave get pulled down -- and intended.
  */
 export function nearestInScale(note, degrees) {
   const octave = Math.floor(note / 12) * 12;

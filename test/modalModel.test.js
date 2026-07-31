@@ -25,15 +25,15 @@ test('zero stiffness gives a perfectly harmonic series', () => {
   for (let i = 0; i < 16; i += 1) close(r[i], i + 1);
 });
 
-test('the fundamental is forced to exactly f0, as the source does', () => {
-  // `f[0] = fundFreq` at TriggerWithGlide.scd:196. Without it, stiffness would
-  // drag the perceived pitch sharp instead of only stretching the partials.
+test('the fundamental is pinned to exactly f0', () => {
+  // Without this, stiffness would drag the perceived pitch sharp instead of only
+  // stretching the partials above it.
   for (const stiffness of [0, 11, 40]) {
     assert.equal(modeRatios(16, stiffness)[0], 1);
   }
 });
 
-test('mode ratios match paper eq. (3) term by term', () => {
+test('mode ratios follow the stiff-string formula term by term', () => {
   // f_n = n*f1*[1 + beta + beta^2 + (n^2 * pi^2 / 8) * beta^2], beta = 0.011.
   const beta = 0.011;
   const r = modeRatios(20, 11);
@@ -60,7 +60,7 @@ test('stiffness stretches the partials progressively sharp', () => {
   assert.ok(cents(1) < 40, `2nd partial stretched ${cents(1).toFixed(1)} cents`);
 });
 
-test('gains sum to 0.5, the source normalizeSum * 0.5', () => {
+test('gains sum to 0.5, leaving 6 dB of headroom', () => {
   for (const m of [2, 3, 4.5, 10, 20]) {
     const g = modeGains(24, m);
     close(g.reduce((a, b) => a + b, 0), 0.5, 1e-6);
@@ -94,7 +94,7 @@ test('mode gains carry a sign, which is mode phase not an error', () => {
 });
 
 test('normalisation stays well conditioned across the pluck range', () => {
-  // normalizeSum divides by a *signed* sum, so cancellation could in principle
+  // Normalisation divides by a *signed* sum, so cancellation could in principle
   // blow the scale factor up. It does not: the fundamental dominates everywhere
   // in 2..20, so no plucking position produces a runaway note level.
   for (let m = 2; m <= 20; m += 0.1) {
@@ -104,7 +104,7 @@ test('normalisation stays well conditioned across the pluck range', () => {
   }
 });
 
-test('gains follow paper eq. (1) up to the normalising factor', () => {
+test('gains follow the pluck-position formula up to the normalising factor', () => {
   const m = 5;
   const count = 12;
   const g = modeGains(count, m);
@@ -145,8 +145,8 @@ test('gains stay finite across the whole plucking-position range', () => {
 });
 
 test('decays follow 0.2 + velocity, scaled', () => {
-  // The source's Env.perc release is 0.2 + vel; damping 0 makes every mode share
-  // it, which is exactly the source's single-envelope behaviour.
+  // Base decay is 0.2 + velocity; damping 0 makes every mode share it, so the
+  // whole voice decays as one envelope.
   const flat = modeDecays(8, 0.5, 0, 1);
   for (const d of flat) close(d, 0.7);
   const scaled = modeDecays(8, 0.5, 0, 2);

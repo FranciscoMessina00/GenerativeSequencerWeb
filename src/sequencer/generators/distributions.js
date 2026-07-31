@@ -1,24 +1,20 @@
 import { nearestInScale, scaleById } from '../scales.js';
 
 /**
- * The three value distributions, transcribed from
- * `TriggerWithGlide.scd:355-465`. Every ported magic number in the generative
- * layer lives in this file so it can be diffed against the `.scd` in one place.
+ * The three value distributions. Every tuned constant in the generative layer is
+ * here, so the whole stochastic character sits in one place.
  *
- * All three share one shape: below a spread threshold they are a Gaussian
- * around the user's bias; above it they switch to a coin-flipped *pair* of
- * Gaussians pinned near the range ends, whose own spread shrinks as the user's
- * spread grows. That inversion is what produces the sweep the paper describes --
- * "a narrow Gaussian ... to a uniform distribution, and eventually to a
- * distribution that generates only extreme values" -- because at maximum spread
- * the two modes collapse onto the range's floor and ceiling.
+ * All three share a shape: below a spread threshold, a Gaussian around the bias;
+ * above it, a coin-flipped *pair* of Gaussians pinned near the range ends whose own
+ * spread shrinks as the user's grows. That inversion is what makes one knob sweep
+ * from narrow, through roughly uniform, to extremes-only.
  */
 
 const clip = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 
 /**
- * SC's `fold`: reflect back and forth between bounds instead of clamping.
- * Used for the plucking position so overshoot bounces rather than sticking.
+ * Reflect back and forth between bounds instead of clamping. Used for the
+ * plucking position, so overshoot bounces rather than sticking at the rail.
  */
 export function fold(x, lo, hi) {
   const range = hi - lo;
@@ -29,9 +25,9 @@ export function fold(x, lo, hi) {
 }
 
 /**
- * Notes. Bias is a MIDI note (1..127), spread 0.1..40.
- * Narrow regime takes `.abs` rather than clipping, so a low bias with moderate
- * spread reflects off zero -- audible as an upward bias near the bottom.
+ * Notes. Bias is a MIDI note (1..127), spread 0..40.
+ * The narrow regime takes `.abs` rather than clipping, so a low bias with
+ * moderate spread reflects off zero -- audible as an upward pull near the bottom.
  */
 export const NOTE_DISTRIBUTION = {
   name: 'note',
@@ -41,7 +37,7 @@ export const NOTE_DISTRIBUTION = {
     rng.coin(0.5)
       ? clip(rng.gauss(41 - spread, 40.1 - spread), 1, 60)
       : clip(rng.gauss(87 + spread, 40.1 - spread), 60, 127),
-  /** Quantisation happens on read, after looping, exactly as in the source. */
+  /** Quantisation happens on read, after looping, so a loop can be re-scaled live. */
   post: (value, params) => nearestInScale(value, scaleById(params.scale).degrees),
   initial: (rng) => rng.randRange(60, 72),
 };
@@ -49,22 +45,11 @@ export const NOTE_DISTRIBUTION = {
 /**
  * Velocity. Bias and spread both 0.1..1. Drives amplitude and decay length.
  *
- * NOTE -- asymmetric by accident, kept on purpose. The note and mod
- * distributions give both wide-regime branches the *same* standard deviation
- * (`40.1 - spread` and `10.1 - spread/2` respectively), so their two modes
- * tighten together onto the range ends. Velocity does not: its quiet branch
- * uses `0.2 - spread/10` for both mean and sd, but its loud branch pairs mean
- * `0.9 + spread/10` with sd `0.9 - spread/10` -- eight times wider at maximum
- * spread (`TriggerWithGlide.scd:365-366`).
- *
- * The practical effect is that at high spread the quiet mode pins hard to 0.1
- * while the loud mode piles up on 1.0 but smears all the way back down. So
- * "extreme" velocity is lopsided: reliably-soft hits against loud hits of
- * unpredictable strength.
- *
- * This looks like a transcription slip in the original (the mean expression
- * mirrored where the shared sd was meant), but it is audible and it is what the
- * instrument does, so it is reproduced rather than "corrected".
+ * Deliberately lopsided in the wide regime, unlike note and mod, whose branches
+ * share a standard deviation and tighten onto both ends together. Here the quiet
+ * branch tightens while the loud one stays eight times broader at maximum spread,
+ * so quiet hits pin reliably to 0.1 while loud hits pile up at 1.0 and smear back
+ * down. That is the point: soft hits you can count on, loud hits you cannot.
  */
 export const VELOCITY_DISTRIBUTION = {
   name: 'velocity',

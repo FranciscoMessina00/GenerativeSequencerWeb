@@ -70,8 +70,8 @@ test('note: widening the spread widens the distribution', () => {
 });
 
 test('note: maximum spread collapses onto the extremes', () => {
-  // At spread 40 the two wide-regime modes have spread 0.1 and sit at the
-  // range ends -- the paper's "distribution that generates only extreme values".
+  // At spread 40 the two wide-regime modes have spread 0.1 and sit at the range
+  // ends, so the distribution emits only extreme values.
   const xs = draw(NOTE_DISTRIBUTION, 64, 40);
   const low = xs.filter((x) => x < 10).length;
   const high = xs.filter((x) => x > 117).length;

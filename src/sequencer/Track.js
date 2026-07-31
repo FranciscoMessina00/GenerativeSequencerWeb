@@ -10,9 +10,9 @@ import { clampParam, defaultsFor } from '../core/paramSchema.js';
 /**
  * One sequencer channel: its parameters plus the four generators that read them.
  *
- * Phase 1 constructs exactly one Track, but nothing here is a singleton --
- * adding channels means constructing more Tracks and giving each its own
- * `trackId`. The Scheduler already iterates a list and tags every event.
+ * Nothing here is a singleton -- adding channels means constructing more Tracks
+ * with their own `trackId`. The Scheduler already iterates a list and tags every
+ * event with the track that produced it.
  */
 export class Track {
   constructor(trackId, rng) {
@@ -83,8 +83,8 @@ export class Track {
 
   #rebuildPattern() {
     const { steps, pulses, rotation } = this.params;
-    // Triggers cannot exceed steps; the Processing GUI allowed both to reach 32
-    // independently, and pulses > steps degenerates to every step active.
+    // Both reach 32 independently, but pulses > steps degenerates to every step
+    // active, so it is capped here instead.
     this.trigger.setPattern(steps, Math.min(pulses, steps), rotation);
   }
 
@@ -101,20 +101,13 @@ export class Track {
   }
 
   /**
-   * Shared ramp-time formula for glide and modulation interpolation.
+   * Shared ramp-time formula for glide and pluck interpolation. The ramp lasts one
+   * step minus 30 ms scaled by magnitude, and the mode picks the curve: exponential
+   * in frequency (linear in pitch-space) or plain linear. Zero magnitude skips the
+   * ramp, which also makes the mode moot -- there is nothing to shape.
    *
-   * From `TriggerWithGlide.scd:387-393`: the ramp lasts one step minus 30 ms
-   * scaled by the magnitude, and the mode chooses the curve -- linear uses
-   * `Line.kr`, exponential uses `XLine.kr` (exponential in frequency, i.e.
-   * linear in pitch-space). Zero magnitude skips the ramp entirely, which the
-   * original did to dodge a glitch with zero-length lines -- and makes the
-   * mode moot, since there's no ramp for it to shape.
-   *
-   * The two callers below derive `(magnitude, exponential)` differently:
-   * modInterp is still one signed -1..1 knob (sign = mode, ported verbatim
-   * from the source); glide is now two independent params, `glideAmount`
-   * (unipolar) and `glideMode` (a toggle), driven by GlideControl.js. Same
-   * formula either way -- only how its inputs are produced differs.
+   * The callers derive `(magnitude, exponential)` differently: glide from two
+   * params, pluck interpolation from one signed knob whose sign is the mode.
    */
   #ramp(magnitude, exponential, stepDuration) {
     if (magnitude === 0) return { time: 0, exponential: false };
@@ -127,10 +120,9 @@ export class Track {
   /**
    * Advance one step and describe it.
    *
-   * All four generators advance on every step, including untriggered ones. That
-   * matches Pbind, which pulls every key's stream per event and only afterwards
-   * turns the event into a `Rest` -- so the random walks keep moving through
-   * silence rather than freezing.
+   * All four generators advance on every step, including untriggered ones, so the
+   * random walks keep moving through silence rather than freezing until the next
+   * note fires.
    *
    * @param {number} stepDuration seconds per step, for glide timing
    */

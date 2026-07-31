@@ -1,7 +1,6 @@
 /*
- * Minimal functional styling. Phase 1 is a test rig for the engine, so the goal
- * is legibility and density -- every control visible at once, no scrolling
- * between a knob and the readout it affects.
+ * Minimal functional styling. The goal is legibility and density: every control
+ * visible at once, no scrolling between a control and the sound it shapes.
  */
 
 :root {
@@ -511,78 +510,4 @@ input[type="range"]::-moz-range-thumb {
   stroke: currentColor;
   stroke-width: 1.6;
   stroke-linecap: round;
-}
-
-/* ---- knob: generic rotary trail + handle (currently unused, kept for the
-   next control that needs one) ---- */
-
-.knob {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  width: 76px;
-  cursor: ns-resize;
-  user-select: none;
-  -webkit-user-select: none;
-  touch-action: none;
-  border-radius: 8px;
-  transition: background-color 0.12s;
-}
-.knob:hover,
-.knob:focus-visible,
-.knob.is-dragging {
-  background: rgba(111, 184, 224, 0.08);
-  outline: none;
-}
-
-.knob__label {
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-/* No background disc behind the arc -- per "leave only the trail and a small
-   circle," the knob is just those two shapes floating on the panel itself. */
-.knob__face {
-  display: block;
-  width: 52px;
-  height: 52px;
-}
-
-.knob__track {
-  fill: none;
-  stroke: var(--line);
-  stroke-width: 4;
-  stroke-linecap: round;
-}
-
-/* Fixed reference mark at value 0, bipolar only -- see Knob.js's `bipolar`. */
-.knob__center-tick {
-  fill: var(--muted);
-}
-
-/* The handle: same role as a linear slider's thumb, just riding an arc. */
-.knob__handle {
-  fill: var(--accent);
-  stroke: #0e1116;
-  stroke-width: 2;
-  transition: r 0.12s;
-}
-.knob:hover .knob__handle,
-.knob.is-dragging .knob__handle,
-.knob:focus-visible .knob__handle {
-  r: 6;
-}
-
-.knob__value {
-  font: 11px ui-monospace, monospace;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.knob:hover .knob__value,
-.knob.is-dragging .knob__value,
-.knob:focus-visible .knob__value {
-  color: var(--accent);
 }

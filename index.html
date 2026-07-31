@@ -9,7 +9,7 @@
 <body>
   <header>
     <div class="title">
-      <h1>Generative Sequencer <span class="sub">modal string · phase 1</span></h1>
+      <h1>Generative Sequencer <span class="sub">modal string</span></h1>
       <p class="status" id="status">audio not started</p>
     </div>
     <div class="transport">
@@ -32,7 +32,8 @@
         <span><i class="swatch fired"></i> triggered</span>
       </div>
       <div id="rhythm-controls"></div>
-      <!-- Hidden for now; main.js still feeds it, so unhiding is a one-liner. -->
+      <!-- Hidden for now. main.js only feeds it while it is visible, so removing
+           this attribute is all it takes to bring it back. -->
       <div class="monitor" id="monitor" hidden>
         <pre id="readout" aria-live="off"></pre>
       </div>

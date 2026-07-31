@@ -1,15 +1,12 @@
 /**
- * A labelled <select>, for params whose values are a short enumerated list
- * (currently: scale) rather than a continuous range -- a slider communicates
- * "somewhere between two ends," which is the wrong shape for "pick one of
- * these ten named things."
+ * A labelled <select>, for params whose values are a short enumerated list rather
+ * than a continuous range: a slider communicates "somewhere between two ends,"
+ * which is the wrong shape for "pick one of these ten named things."
  */
 export class Dropdown {
   /**
-   * @param {object} opts
-   * @param {object} opts.spec      paramSchema entry
+   * @param {object} opts.spec paramSchema entry
    * @param {{value:number,label:string}[]} opts.options
-   * @param {Function} opts.onInput (value) => void
    */
   constructor({ spec, options, onInput }) {
     this.spec = spec;

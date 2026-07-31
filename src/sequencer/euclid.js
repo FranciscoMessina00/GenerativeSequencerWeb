@@ -1,20 +1,16 @@
 /**
  * Euclidean rhythm generation.
  *
- * Ported from `Supercollider/TriggerWithGlide.scd:228-258`. This is a
- * bucket/Bresenham accumulator, NOT the Bjorklund algorithm -- for many
- * (steps, pulses) pairs the two agree, but not all, so the accumulator is kept
- * verbatim to preserve the instrument's actual rhythmic vocabulary.
+ * A bucket/Bresenham accumulator, deliberately NOT the Bjorklund algorithm --
+ * for many (steps, pulses) pairs the two agree, but not all, and where they
+ * differ the accumulator's rotation is the more syncopated of the two. That is
+ * this instrument's rhythmic vocabulary, so don't "correct" it into Bjorklund.
  *
- * The `rotation + 1` offset is also part of the original and is deliberate:
- * with rotation 0 the accumulator's trailing pulse is shifted to the downbeat,
- * which is why the default patch starts on beat 1.
+ * The `rotation + 1` offset is likewise intentional: at rotation 0 it shifts the
+ * accumulator's trailing pulse onto the downbeat, so patterns start on beat 1.
  */
 
-/**
- * Rotate right by `rotate` positions.
- * Port of `~rotateSeq` (`TriggerWithGlide.scd:251-258`).
- */
+/** Rotate right by `rotate` positions. */
 export function rotateRight(seq, rotate) {
   const size = seq.length;
   if (size === 0) return [];
@@ -46,7 +42,6 @@ export function euclid(steps, pulses, rotation = 0) {
     }
   }
 
-  // The +1 and the modulo are both from the source.
   const rot = (Math.floor(rotation) + 1) % n;
   return rot > 0 ? rotateRight(rhythm, rot) : rhythm;
 }

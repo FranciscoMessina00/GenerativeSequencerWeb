@@ -211,32 +211,55 @@ test('every step carries what the audio engine needs', () => {
   }
 });
 
-test('glide amount+mode produces the same ramp as the old signed value did', () => {
-  // Regression/equivalence check: splitting glide into glideAmount (unipolar)
-  // + glideMode (a toggle) must reproduce exactly the same {time, exponential}
-  // the old single signed -1..1 value produced -- same magnitude, mode instead
-  // of sign. Mirrors Track.js's #ramp directly since that's the formula being
-  // guarded.
+test('glide ramps for one step minus 30ms, scaled by amount', () => {
+  const track = new Track(0, new Rng(1));
   const stepDuration = 0.125;
-  const ramp = (magnitude, exponential) => {
-    if (magnitude === 0) return { time: 0, exponential: false };
-    return { time: Math.max(0, (stepDuration - 0.03) * magnitude), exponential };
-  };
-  const oldRampFor = (amount) => {
-    if (amount === 0) return { time: 0, exponential: false };
-    return { time: Math.max(0, (stepDuration - 0.03) * Math.abs(amount)), exponential: amount > 0 };
-  };
 
-  for (const amount of [-1, -0.7, -0.01, 0, 0.01, 0.4, 1]) {
-    const old = oldRampFor(amount);
-    const next = ramp(Math.abs(amount), amount > 0);
-    assert.deepEqual(next, old, `amount ${amount}`);
+  // Zero amount skips the ramp entirely, which also makes the mode moot.
+  track.setParam('glideAmount', 0);
+  track.setParam('glideMode', true);
+  const none = track.step(stepDuration);
+  assert.equal(none.glideTime, 0);
+  assert.equal(none.glideExponential, false);
+
+  track.setParam('glideMode', false);
+  for (const amount of [0.01, 0.4, 1]) {
+    track.setParam('glideAmount', amount);
+    const step = track.step(stepDuration);
+    assert.equal(step.glideTime, (stepDuration - 0.03) * amount, `amount ${amount}`);
+    assert.equal(step.glideExponential, false, `amount ${amount}`);
   }
+
+  // Mode selects the curve without touching the ramp's length.
+  track.setParam('glideMode', true);
+  const exponential = track.step(stepDuration);
+  assert.equal(exponential.glideTime, (stepDuration - 0.03) * 1);
+  assert.equal(exponential.glideExponential, true);
 });
 
-test('the trigger loop produces the paper 70-step super-pattern', () => {
-  // "setting the random trigger loop length to 7 and combining it with a 10-step
-  // Euclidean pattern produces a 70-step pattern" -- which holds when the pulse
+test('pluck-position interpolation takes its curve from the knob sign', () => {
+  const track = new Track(0, new Rng(1));
+  const stepDuration = 0.125;
+
+  track.setParam('modInterp', 0);
+  assert.equal(track.step(stepDuration).modTime, 0);
+
+  // Magnitude sets the ramp length, sign selects linear (negative) or
+  // exponential (positive).
+  track.setParam('modInterp', -0.5);
+  const linear = track.step(stepDuration);
+  assert.equal(linear.modTime, (stepDuration - 0.03) * 0.5);
+  assert.equal(linear.modExponential, false);
+
+  track.setParam('modInterp', 0.5);
+  const exponential = track.step(stepDuration);
+  assert.equal(exponential.modTime, (stepDuration - 0.03) * 0.5);
+  assert.equal(exponential.modExponential, true);
+});
+
+test('the trigger loop produces a 70-step super-pattern', () => {
+  // A 7-step random trigger loop against a 10-step Euclidean pattern gives a
+  // 70-step pattern -- which holds when the pulse
   // count is coprime with the step count. With gcd > 1 the Euclidean cycle
   // repeats within itself and the combined period is correspondingly shorter.
   const period = (arr) => {

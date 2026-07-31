@@ -34,7 +34,7 @@ test('nearestInList picks the closest element', () => {
   assert.equal(nearestInList(-3, major), 0); // below the bottom -> first
 });
 
-test('nearestInList resolves exact ties downward, as SC does', () => {
+test('nearestInList resolves exact ties downward', () => {
   const pent = [0, 2, 4, 7, 9];
   assert.equal(nearestInList(1, pent), 0); // equidistant from 0 and 2
   assert.equal(nearestInList(3, pent), 2); // equidistant from 2 and 4
@@ -56,13 +56,13 @@ test('chromatic quantisation is plain rounding (ties down)', () => {
 });
 
 test('quantisation does NOT wrap across the octave boundary', () => {
-  // SC takes the octave first, then snaps the remainder inside it. In major
+  // The octave is taken first, then the remainder snapped inside it. In major
   // pentatonic [0,2,4,7,9] the top degree is 9, so 11.6 snaps DOWN to 9 rather
   // than up to the 12 of the next octave -- a 2.6-semitone pull.
   //
-  // This biases notes near the top of each octave downward. It is audible, it
-  // is what the original instrument does, and "fixing" it would change the
-  // instrument's character, so it is asserted deliberately.
+  // This biases notes near the top of each octave downward. It is audible and
+  // intended, so it is asserted deliberately: "fixing" it would change the
+  // instrument's character.
   const pent = scaleById(4).degrees;
   assert.equal(nearestInScale(11.6, pent), 9);
   assert.equal(nearestInScale(71.6, pent), 69);

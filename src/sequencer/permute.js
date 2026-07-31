@@ -1,36 +1,18 @@
 /**
- * Deterministic indexed permutation, standing in for SuperCollider's
- * `SequenceableCollection.permute(nthPermutation)`.
- *
- * Used by the "Rhythm permutations" and "Notes permutation" knobs
- * (`TriggerWithGlide.scd:581-585`, `:609-613`), where turning the knob walks
- * through permutations of the captured loop -- reordering it without changing
- * its contents, so a rhythm keeps its density and a melody keeps its pitch set.
- *
- * This is the canonical factorial-number-system (Lehmer code) decode. It is
- * functionally equivalent to the original, but not guaranteed bit-identical:
- * a given knob value may select a different permutation than SC would. The
- * properties that matter musically -- index 0 is the identity, the mapping is
- * stable across calls, and every index yields a true permutation -- hold.
+ * Deterministic indexed permutation -- a factorial-number-system (Lehmer code)
+ * decode. Drives the rhythm and note permutation knobs: turning one reorders the
+ * captured loop without changing its contents, so a rhythm keeps its density and
+ * a melody keeps its pitch set.
  */
+
 /**
- * Map a normalised 0..1 knob onto a permutation index for a loop of `length`.
+ * Map a normalised 0..1 knob onto a permutation index for a loop of `length`,
+ * scaled by the loop's own factorial so the whole space is reachable.
  *
- * The two GUIs in the original disagreed about this control, and the difference
- * matters. The SuperCollider-native GUI scales the knob by the loop's factorial
- * (`TriggerWithGlide.scd:581`, `:609`), so the full permutation space is
- * reachable. The Processing GUI -- the one the paper documents -- instead sent a
- * raw 0..20 (`Vista.pde:44-49`).
- *
- * A raw 0..20 index is very nearly inert, because factorial-base decoding spends
- * its low digits on the *leading* positions: for a 32-slot loop only
- * `n % 32` is ever non-zero, so the knob can do no more than lift one element to
- * the front -- and for a sparse binary rhythm that element is usually a 0, so
- * nothing audible changes at all.
- *
- * Since the paper describes this control as one that "generates new sequences",
- * the SC-native scaling is the reading that actually delivers that. Clipped at
- * 12 as the source does, because 13! exceeds a 32-bit integer.
+ * A small fixed index range would be nearly inert: factorial-base decoding spends
+ * its low digits on the *leading* positions, so a small index can barely do more
+ * than lift one element to the front -- usually a 0 in a sparse rhythm, changing
+ * nothing audible. Clipped at 12 because 13! exceeds a 32-bit integer.
  */
 export function permutationIndex(normalized, length) {
   const n = Math.max(1, Math.min(12, Math.floor(length)));

@@ -2,13 +2,13 @@ import { buildNote, midiToHz, modeGains } from './modal/modalModel.js';
 import { clampParam, defaultsFor } from '../core/paramSchema.js';
 
 /**
- * Owns the AudioContext and the node graph, and turns step events into note-ons.
+ * Owns the AudioContext and node graph, and turns step events into note-ons.
  *
  * Graph:  modal-processor -> granulator-processor -> [FX insert] -> master -> out
  *
- * All physics happens here on the main thread; the worklets receive finished mode
- * tables. That keeps the model in one testable place and means a note-on message
- * is a few hundred bytes rather than a round trip of parameter negotiation.
+ * Physics happens here on the main thread and the worklets receive finished mode
+ * tables, so the model stays in one testable place and a note-on is a few hundred
+ * bytes rather than a parameter negotiation.
  */
 export class AudioEngine {
   constructor(bus) {
@@ -37,8 +37,7 @@ export class AudioEngine {
       this.context.audioWorklet.addModule('./src/audio/worklets/granulator-processor.js'),
     ]);
 
-    // Mono throughout, as in the source (its grains were centred). The output
-    // node up-mixes to stereo for us.
+    // Mono throughout; the destination node up-mixes to stereo.
     this.modalNode = new AudioWorkletNode(this.context, 'modal-processor', {
       numberOfInputs: 0,
       numberOfOutputs: 1,
@@ -54,8 +53,8 @@ export class AudioEngine {
     this.masterGain = this.context.createGain();
     this.masterGain.gain.value = this.params.masterGain;
 
-    // The FX insert the plan reserves for phase 2 goes between the granulator
-    // and the master gain; nothing else needs to move to add it.
+    // An FX insert would go between the granulator and the master gain; nothing
+    // else needs to move to add one.
     this.modalNode.connect(this.granulatorNode);
     this.granulatorNode.connect(this.masterGain);
     this.masterGain.connect(this.context.destination);
@@ -102,9 +101,8 @@ export class AudioEngine {
    * Sound one step.
    *
    * The step carries the note it decided on plus the note before it, because both
-   * glides in this instrument run *from the previous value into the current one*
-   * across the step -- the source ramps a control bus from `noteArray[29]` to the
-   * current note (`TriggerWithGlide.scd:409`).
+   * glides in this instrument ramp *from the previous value into the current one*
+   * across the step.
    */
   noteOn(step) {
     if (!this.ready || !step.triggered) return;

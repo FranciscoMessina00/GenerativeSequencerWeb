@@ -19,19 +19,14 @@ function buildModeIcon(exponential) {
 }
 
 /**
- * Glide's control: a mode-toggle icon button next to a drag-number for the
- * amount, rather than one signed slider whose sign used to double as the mode.
+ * Glide's control: a mode-toggle icon button next to a drag-number for the amount.
  * A click flips linear/exponential; dragging the number sets how much.
  *
- * Not a generic icon-toggle system -- only glide needs this shape of control
- * right now, so it's built specifically for it, the same way BiasSpreadSlider
- * is built for bias/spread rather than being a generic two-value widget.
+ * Built specifically for glide rather than as a generic icon-toggle system, the
+ * same way BiasSpreadSlider is built for bias/spread.
  */
 export class GlideControl {
   /**
-   * @param {object} opts
-   * @param {EventBus} opts.bus
-   * @param {number} [opts.trackId]
    * @param {object} opts.amountSpec paramSchema entry for the unipolar amount
    * @param {object} opts.modeSpec   paramSchema entry for the mode toggle
    */

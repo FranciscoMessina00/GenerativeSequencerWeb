@@ -12,18 +12,16 @@ import { GlideControl } from './ui/GlideControl.js';
 import { SCALES } from './sequencer/scales.js';
 
 /**
- * Bootstrap. The only module that knows about all the others.
- *
- * Everything downstream communicates over the bus, so the sequencer has no
- * reference to the audio engine and neither has any reference to the DOM.
+ * Bootstrap. The only module that knows about all the others -- everything
+ * downstream talks over the bus.
  */
 
 const bus = new EventBus();
 const rng = new Rng();
 const audio = new AudioEngine(bus);
 
-// Phase 1 is a single channel. `tracks` is already a list and every event is
-// tagged with its trackId, so adding channels is additive.
+// One channel for now. `tracks` is a list and every event carries its trackId, so
+// adding channels is additive.
 const tracks = [new Track(0, rng)];
 
 const scheduler = new Scheduler({
@@ -44,8 +42,8 @@ ui.renderDragNumbers(hubEl, EUCLID_KEYS);
 ui.renderGroups(document.getElementById('rhythm-controls'), ['Rhythm'], {
   skip: EUCLID_KEYS,
 });
-// Bias/spread pairs get one combined slider instead of two separate ones: the
-// handle is the bias, the wheel adjusts spread. See src/ui/BiasSpreadSlider.js.
+// Bias/spread pairs get one combined slider instead of two: the handle is the
+// bias, the wheel adjusts spread.
 const BIAS_SPREAD_AXES = {
   Pitch: { bias: 'noteBias', spread: 'noteSpread', title: 'Note' },
   Velocity: { bias: 'velBias', spread: 'velSpread', title: 'Velocity' },
@@ -64,10 +62,8 @@ for (const [group, axes] of Object.entries(BIAS_SPREAD_AXES)) {
 }
 const sliderSkipKeys = Object.values(BIAS_SPREAD_AXES).flatMap((a) => [a.bias, a.spread]);
 
-// Scale (an enumerated pick) and Glide (an amount + a mode toggle, see
-// src/ui/GlideControl.js) share one row below the Note bias/spread slider --
-// Scale flexes to fill it, Glide sits fixed-width at the right. See
-// src/ui/Dropdown.js.
+// Scale and Glide share one row below the Note slider: Scale flexes to fill it,
+// Glide sits fixed-width at the right.
 const scaleDropdown = new Dropdown({
   spec: paramSpec('scale'),
   options: SCALES.map((s) => ({ value: s.id, label: s.name })),
@@ -92,7 +88,10 @@ ui.renderGroups(
   PARAM_GROUPS.filter((g) => g !== 'Rhythm'),
   { skip: [...sliderSkipKeys, 'scale', 'glideAmount', 'glideMode'], prepend: sliderPrepend },
 );
-ui.attachReadout(document.getElementById('readout'));
+// Attaching a hidden readout would still cost a full reformat on every step, so
+// the monitor's own visibility decides whether it gets fed.
+const monitorEl = document.getElementById('monitor');
+if (!monitorEl.hidden) ui.attachReadout(document.getElementById('readout'));
 
 const view = new EuclidView(
   document.getElementById('ring'),

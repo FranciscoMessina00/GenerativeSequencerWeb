@@ -1,10 +1,11 @@
 /**
- * Seedable random source.
+ * Seedable random source, injected rather than global, for two reasons: the
+ * distribution tests need determinism, and a user-visible seed is a genuinely
+ * useful control in a generative instrument -- it makes a patch reproducible.
  *
- * The original uses SuperCollider's global RNG (`.coin`, `.gauss`, `Array.rand`).
- * Here it is an injectable object instead, for two reasons: the distribution
- * tests need determinism, and a user-visible seed is a genuinely useful control
- * in a generative instrument -- it makes a patch reproducible.
+ * Note this covers the note stream only. The granulator's grain onsets run on the
+ * audio thread and are not seeded, so a patch repeats its notes exactly but not
+ * its grain texture.
  */
 
 /** mulberry32: small, fast, good enough statistically for musical decisions. */
@@ -35,16 +36,12 @@ export class Rng {
     return this.next();
   }
 
-  /**
-   * SuperCollider's `prob.coin` -- true with probability `prob`.
-   * Note `0.coin` is always false and `1.coin` always true, which the manual
-   * verification checklist relies on.
-   */
+  /** True with probability `prob`; absolute at 0 and 1. */
   coin(prob) {
     return this.next() < prob;
   }
 
-  /** Same as coin() but returns 1/0, matching SC's `.binaryValue`. */
+  /** Same as coin() but returns 1/0, for the trigger bit stream. */
   coinBit(prob) {
     return this.next() < prob ? 1 : 0;
   }
@@ -69,7 +66,7 @@ export class Rng {
     return mu + sigma * mag * Math.cos(2 * Math.PI * v);
   }
 
-  /** Uniform in [lo, hi), matching SC's `Array.rand(n, lo, hi)` element-wise. */
+  /** Uniform in [lo, hi). */
   randRange(lo, hi) {
     return lo + this.next() * (hi - lo);
   }

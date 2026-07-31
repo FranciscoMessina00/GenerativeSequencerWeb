@@ -1,20 +1,14 @@
 /**
- * The circular step display, following the Processing sketch's ring
- * (`Vista.pde:375-393`) but drawn as annular sectors rather than dots: the circle
- * is divided into one wedge per step, solid where the Euclidean pattern has a
- * pulse. Sectors make the pattern's *duty* legible -- each step visibly owns a
- * slice of the bar -- which dots cannot show.
+ * The circular step display: one annular sector per step, solid where the pattern
+ * has a pulse. Sectors rather than dots so each step visibly owns a slice of the
+ * bar, making the pattern's duty legible.
  *
- * Two additions the original did not have, both for verification: the playhead
- * shows where the sequence actually is, and each step is marked with whether it
- * *fired* -- which for this instrument is not the same thing as whether the
- * Euclidean pattern had a pulse there, since the logic operator and the random
- * stream get a say. Being able to see those three layers at once is the fastest
- * way to confirm the operators are wired correctly.
+ * Three layers at once -- pattern, playhead, and whether each step actually
+ * *fired*, which is not the same thing since the logic operator and random stream
+ * get a say.
  *
- * Crucially the playhead is driven by the audio clock, not by the scheduler. The
- * scheduler decides steps ~100 ms early; drawing on that would show the ring
- * running ahead of what you hear.
+ * The playhead follows the audio clock, not the scheduler: the scheduler decides
+ * steps ~100 ms early, so drawing on that would run ahead of what you hear.
  */
 /** Distance from the canvas edge to the outer rim, leaving room for fired bands. */
 const RIM_MARGIN = 18;
@@ -23,8 +17,6 @@ const HUB_RATIO = 0.8;
 
 export class EuclidView {
   /**
-   * @param {HTMLCanvasElement} canvas
-   * @param {Function} getAudioTime
    * @param {Function} [onGeometry] called with {cx, cy, outerR, innerR} whenever
    *   the canvas is measured, so an HTML overlay can be fitted to the hub.
    */
@@ -41,6 +33,8 @@ export class EuclidView {
     /** stepIndex -> did it fire last time round. */
     this.fired = new Map();
     this.running = false;
+    /** Repaint only when something actually changed; see frame(). */
+    this.dirty = true;
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -70,10 +64,18 @@ export class EuclidView {
     this.cssWidth = rect.width;
     this.cssHeight = rect.height;
     this.onGeometry?.(this.geometry);
+    // Assigning canvas.width/height blanks the surface.
+    this.dirty = true;
   }
 
   setPattern(pattern) {
-    this.pattern = pattern.length ? pattern : [0];
+    const next = pattern.length ? pattern : [0];
+    // A change in step count invalidates the fired indices. Rotation and pulse
+    // changes keep the length, so their marks stay meaningful and are left alone
+    // rather than flickering off on every drag.
+    if (next.length !== this.pattern.length) this.fired.clear();
+    this.pattern = next;
+    this.dirty = true;
   }
 
   /** Called when the scheduler decides a step, well before it sounds. */
@@ -90,7 +92,10 @@ export class EuclidView {
     if (!running) {
       this.queue.length = 0;
       this.currentStep = -1;
+      // Otherwise the fired bands stay lit on a stopped ring.
+      this.fired.clear();
     }
+    this.dirty = true;
   }
 
   frame() {
@@ -101,8 +106,14 @@ export class EuclidView {
       const step = this.queue.shift();
       this.currentStep = step.stepIndex;
       this.fired.set(step.stepIndex, step.triggered);
+      this.dirty = true;
     }
-    this.draw();
+    // While running a step promotes every few frames, so this is effectively
+    // always true; stopped, the ring settles and stops costing anything.
+    if (this.dirty) {
+      this.draw();
+      this.dirty = false;
+    }
     requestAnimationFrame(() => this.frame());
   }
 
@@ -165,8 +176,7 @@ export class EuclidView {
 
       // A green band outside the rim means the step actually triggered a note.
       // Where that disagrees with the sector fill, the logic operator or the
-      // random stream changed the outcome -- which is exactly what you want to be
-      // able to see at a glance.
+      // random stream changed the outcome.
       if (didFire) {
         this.#sectorPath(cx, cy, outerR + 3, outerR + 7, a0, a1);
         ctx.fillStyle = 'rgba(130, 230, 150, 0.9)';

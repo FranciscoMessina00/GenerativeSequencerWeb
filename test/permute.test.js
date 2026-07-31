@@ -59,7 +59,7 @@ test('permutationIndex spans the whole space for the loop length', () => {
   assert.equal(permutationIndex(0, 7), 0);
   assert.equal(permutationIndex(1, 7), 5039);
   assert.equal(permutationIndex(0.5, 7), 2520);
-  // Clamped at 12! as the source does, since 13! overflows a 32-bit int.
+  // Clamped at 12!, since 13! overflows a 32-bit int.
   assert.equal(permutationIndex(1, 32), 479001599);
   assert.equal(permutationIndex(1, 12), 479001599);
 });
@@ -79,6 +79,7 @@ test('the knob produces a range of distinct orderings', () => {
   for (let k = 0; k <= 20; k += 1) {
     seen.add(permute(a, permutationIndex(k / 20, a.length)).join(','));
   }
-  // The raw 0..20 index the Processing GUI sent would yield only a handful here.
+  // A small fixed index range would yield only a handful of these; scaling by the
+  // loop's factorial is what opens up the space.
   assert.ok(seen.size >= 18, `only ${seen.size} distinct orderings from 21 knob positions`);
 });

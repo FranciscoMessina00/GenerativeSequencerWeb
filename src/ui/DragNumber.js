@@ -1,21 +1,16 @@
 /**
- * A label-plus-number control that you change by dragging vertically.
+ * A label-plus-number control changed by dragging vertically. Takes only as much
+ * room as its text and draws resolution from pointer travel rather than layout
+ * width, which is what lets it live inside the step ring.
  *
- * Sliders need horizontal room and their travel is fixed by their width, which
- * makes them a poor fit for the inside of the step ring: the space there is
- * circular and tight, and steps/pulses/rotation want precise integer nudges more
- * than they want a broad sweep. A drag-number takes only as much room as its text
- * and gets its resolution from pointer travel instead of layout width.
- *
- * Interaction, in order of how much it is likely to be used:
  *   drag up/down   coarse change, full range over ~180 px
  *   shift + drag   eight times finer, for the fractional params
  *   wheel          one step per notch
  *   arrows         one step; page up/down ten; home/end to the extremes
  *   double click   back to the schema default
  *
- * The pointer is captured on press, so the drag keeps working when it leaves the
- * element -- necessary here because the element is small and sits inside a circle.
+ * The pointer is captured on press so the drag survives leaving the element --
+ * necessary because it is small and sits inside a circle.
  */
 
 import { quantize } from './numberUtils.js';
@@ -26,10 +21,8 @@ const FINE_DIVISOR = 8;
 
 export class DragNumber {
   /**
-   * @param {object} opts
-   * @param {object} opts.spec    entry from paramSchema
+   * @param {object} opts.spec     entry from paramSchema
    * @param {Function} opts.format (value) => display string
-   * @param {Function} opts.onInput (value) => void
    */
   constructor({ spec, format, onInput }) {
     this.spec = spec;

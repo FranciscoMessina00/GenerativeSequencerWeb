@@ -28,7 +28,7 @@ test('degenerate cases', () => {
   assert.deepEqual(euclid(1, 1, 0), [1]);
 });
 
-test('the source +1 rotation offset puts a pulse on the downbeat', () => {
+test('the built-in +1 rotation offset puts a pulse on the downbeat', () => {
   // The raw accumulator emits its pulse on the LAST step; the built-in +1
   // rotation moves it to the first. Losing this offset would shift every
   // pattern in the instrument by one 16th.
@@ -47,7 +47,7 @@ test('rotation preserves density and cycles back', () => {
 });
 
 test('known patterns', () => {
-  // 5 in 16, the paper's worked example: inter-onset gaps of 4,3,3,3,3.
+  // 5 in 16: inter-onset gaps of 4,3,3,3,3.
   assert.deepEqual(
     euclid(16, 5, 0),
     [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0],
@@ -74,12 +74,12 @@ test('onsets are spread as evenly as the step count allows', () => {
   }
 });
 
-test('the accumulator diverges from Bjorklund, as the source does', () => {
-  // Canonical Bjorklund E(5,8) is [1,0,1,1,0,1,1,0] -- two adjacent pairs.
-  // The source's bucket accumulator yields a different, more syncopated
-  // rotation of five pulses. Both are valid "5 as evenly as possible over 8",
-  // but they are audibly different rhythms, so this pins the ported behaviour
-  // against someone later "correcting" euclid.js into a real Bjorklund.
+test('the accumulator diverges from Bjorklund for some step/pulse pairs', () => {
+  // Canonical Bjorklund E(5,8) is [1,0,1,1,0,1,1,0] -- two adjacent pairs. The
+  // bucket accumulator yields a different, more syncopated rotation of five
+  // pulses. Both are valid "5 as evenly as possible over 8", but they are audibly
+  // different rhythms, so this pins the chosen one against someone later
+  // "correcting" euclid.js into a real Bjorklund.
   assert.deepEqual(euclid(8, 5, 0), [1, 0, 1, 0, 1, 1, 0, 1]);
   assert.notDeepEqual(euclid(8, 5, 0), [1, 0, 1, 1, 0, 1, 1, 0]);
 });

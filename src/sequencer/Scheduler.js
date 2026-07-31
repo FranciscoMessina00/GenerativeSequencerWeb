@@ -4,15 +4,13 @@ import { clampParam, defaultsFor } from '../core/paramSchema.js';
 /**
  * Lookahead clock.
  *
- * Web Audio has no callback-per-note mechanism, so the standard approach applies:
- * wake up often on a coarse timer, and each time push every step that falls
- * inside a short window ahead of the audio clock. Notes therefore get decided
- * ~100 ms early and carry an explicit `audioTime`, which the audio engine turns
- * into a sample-accurate start. Timer jitter shifts *when we decide*, never
- * *when it sounds*.
+ * Web Audio has no callback-per-note, so: wake often on a coarse timer, and each
+ * time push every step falling inside a short window ahead of the audio clock.
+ * Notes get decided ~100 ms early carrying an explicit `audioTime`, which the
+ * audio engine turns into a sample-accurate start -- so timer jitter shifts *when
+ * we decide*, never *when it sounds*.
  *
- * `TempoClock(bpm * 4 / 60)` with `\dur, 1` in the original means one step is a
- * 16th note, so a step lasts `60 / (bpm * 4)` seconds.
+ * One step is a 16th note, so a step lasts `60 / (bpm * 4)` seconds.
  */
 export class Scheduler {
   /**
@@ -55,7 +53,7 @@ export class Scheduler {
     this.pump();
   }
 
-  /** Pause, keeping the playhead where it is (the source's `Ndef.pause`). */
+  /** Pause, keeping the playhead where it is. */
   stop() {
     if (!this.running) return;
     this.running = false;
@@ -69,14 +67,12 @@ export class Scheduler {
   }
 
   /**
-   * Emit every step that falls inside the lookahead window.
-   *
-   * Driven by the Ticker in normal use; public so tests can advance a fake clock
-   * and pump deterministically instead of waiting on real timers.
+   * Emit every step that falls inside the lookahead window. Driven by the Ticker;
+   * public so tests can pump a fake clock deterministically.
    *
    * `nextStepTime` accumulates rather than being recomputed from a step counter,
-   * which is what keeps the grid immune to timer jitter: a late tick emits two
-   * steps at their correct original times rather than sliding the grid.
+   * which is what makes the grid immune to timer jitter: a late tick emits two
+   * steps at their correct original times instead of sliding the grid.
    */
   pump() {
     if (!this.running) return;

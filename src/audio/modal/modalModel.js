@@ -1,18 +1,11 @@
 /**
- * The physical model of the string, as pure functions.
+ * The physical model of the string, as pure functions. Deliberately separate from
+ * the DSP -- the worklet gets handed finished mode tables -- so the physics stays
+ * testable in Node and exists in exactly one place.
  *
- * This is the direct port of the paper's equations and of `~amp`/`~freq` in
- * `TriggerWithGlide.scd:164-198`. It is deliberately separated from the DSP: the
- * worklet is a dumb resonator bank that gets handed mode tables, so the physics
- * stays testable in Node and exists in exactly one place.
- *
- * The one substantive change from the original is *how* the modes are sounded.
- * The source sums a `SinOsc` per mode -- up to 200 of them in ModalSynth.scd --
- * which the paper itself flags: "it may increase CPU usage. To reduce the stress
- * of the CPU we can reduce the number of harmonics". Here each mode becomes a
- * two-pole resonator instead. Same frequencies, same amplitudes, but the modes
- * ring on their own rather than being driven, so the cost per mode is a handful
- * of multiply-adds and the sound gets per-mode decay for free.
+ * Each mode is sounded by a two-pole resonator rather than a summed sine. Same
+ * frequencies and amplitudes, but a resonator rings on its own instead of being
+ * driven, so modes cost a few multiply-adds each and get per-mode decay for free.
  */
 
 /** −60 dB in nepers: ln(1000). Converts a T60 to a pole radius. */
@@ -21,14 +14,13 @@ export const LOG_1000 = Math.log(1000);
 /**
  * Modal frequency ratios f[n] / f0, for n = 1..count.
  *
- * Paper eq. (3): f_n = n·f1·[1 + β + β² + (n²π²/8)·β²], with β from eq. (4)
- * standing in for the string's stiffness. The source passes `stiffness = 11` and
- * divides by 1000 internally, giving β = 0.011 -- the value the paper reports as
- * sounding most realistic.
+ *   f_n = n · f1 · (1 + β + β² + n²π²β²/8),  β = stiffness / 1000
  *
- * Ratios rather than absolute frequencies, because they are independent of f0:
- * that is what lets a gliding voice rescale its whole mode bank with one
- * multiply instead of re-deriving the model every sub-block.
+ * Stiffness stretches the upper partials progressively sharp, which is what
+ * separates a struck string from a plain harmonic series.
+ *
+ * Ratios rather than absolute frequencies, so a gliding voice rescales its whole
+ * mode bank with one multiply instead of re-deriving the model every sub-block.
  */
 export function modeRatios(count, stiffness, out = new Float32Array(count)) {
   const beta = stiffness / 1000;
@@ -39,8 +31,8 @@ export function modeRatios(count, stiffness, out = new Float32Array(count)) {
     const n = i + 1;
     out[i] = n * (1 + detune + n * n * variablePart);
   }
-  // The source forces the fundamental to be exactly f0 (`f[0] = fundFreq`), so
-  // stiffness stretches the partials upward without dragging the pitch with it.
+  // The fundamental is pinned to exactly f0, so stiffness stretches the partials
+  // upward without dragging the perceived pitch with them.
   out[0] = 1;
   return out;
 }
@@ -48,13 +40,11 @@ export function modeRatios(count, stiffness, out = new Float32Array(count)) {
 /**
  * Modal amplitudes for a string plucked at position `m`, normalised to sum 0.5.
  *
- * Paper eq. (1): B_n = 2m² / (n²π²(m−1)) · sin(nπ/m), where m is the plucking
- * position as a fraction of the string length (the instrument's `modulation`
- * parameter, 2..20). m = 2 is a dead-centre pluck, which nulls every even mode;
- * larger m moves toward the bridge and brightens the spectrum.
+ *   B_n = 2m² / (n²π²(m−1)) · sin(nπ/m)
  *
- * The 0.5 factor is the source's `normalizeSum * 0.5` -- 6 dB of headroom so a
- * full-velocity note cannot clip on its own.
+ * `m` is the pluck position as a fraction of string length (2..20): m = 2 is
+ * dead-centre and nulls every even mode, larger m moves toward the bridge and
+ * brightens. Normalising to 0.5 leaves 6 dB of headroom against clipping.
  */
 export function modeGains(count, pluckPosition, out = new Float32Array(count)) {
   // m = 1 would divide by zero, and m < 1 is not physical.
@@ -71,8 +61,8 @@ export function modeGains(count, pluckPosition, out = new Float32Array(count)) {
     sum += value;
   }
 
-  // normalizeSum divides by the sum of the raw values, which for this formula is
-  // positive and well away from zero across the whole 2..20 range.
+  // The raw sum is positive and well away from zero across the whole 2..20 range,
+  // so this normalisation stays well conditioned.
   const scale = sum !== 0 ? 0.5 / sum : 0;
   for (let i = 0; i < count; i += 1) {
     out[i] *= scale;
@@ -83,16 +73,11 @@ export function modeGains(count, pluckPosition, out = new Float32Array(count)) {
 /**
  * Per-mode −60 dB decay times, in seconds.
  *
- * The source has no per-mode decay at all: every sine shares one
- * `Env.perc(0.01, 0.2 + vel, curve: -4)`, so all partials die together. A
- * resonator bank has to say how fast each mode rings, so this is the one place
- * the port must add rather than transcribe.
+ *   T60[n] = base · n^(−damping),  base = (0.2 + velocity) · decayScale
  *
- * `T60[n] = base · n^(−damping)` follows the physics -- higher modes lose energy
- * faster -- and produces the bright attack settling into a darker tail that a
- * real string has. `damping = 0` recovers the source's behaviour of every mode
- * decaying at the same rate. The base range 0.2..1.2 s is the source's
- * `0.2 + vel`, scaled by a user Decay control.
+ * Higher modes losing energy faster is what gives a string its bright attack
+ * settling into a darker tail; `damping = 0` decays them together and sounds
+ * notably more synthetic.
  */
 export function modeDecays(count, velocity, damping, decayScale, out = new Float32Array(count)) {
   const base = (0.2 + velocity) * decayScale;
@@ -103,11 +88,9 @@ export function modeDecays(count, velocity, damping, decayScale, out = new Float
 }
 
 /**
- * Everything the worklet needs to start one note.
- *
- * Modes whose frequency would land above Nyquist are dropped: an aliased
- * resonator is not just inaudible but actively wrong, since a two-pole filter
- * tuned past Nyquist folds back into the audible band.
+ * Everything the worklet needs to start one note. Modes above Nyquist are dropped:
+ * a two-pole filter tuned past it folds back into the audible band, so an aliased
+ * resonator is not merely inaudible but actively wrong.
  */
 export function buildNote({
   midinote,

@@ -1,7 +1,7 @@
 {
   "name": "web-generative-sequencer",
   "version": "0.1.0",
-  "description": "Generative Euclidean sequencer with a modal string voice, ported to the Web Audio API from the CMLS Stefano Lavori SuperCollider/Processing project.",
+  "description": "Generative Euclidean sequencer driving a modal string voice, built on the Web Audio API.",
   "type": "module",
   "private": true,
   "scripts": {

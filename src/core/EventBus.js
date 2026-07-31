@@ -1,7 +1,5 @@
 /**
- * Minimal synchronous pub/sub.
- *
- * The whole point is to keep the sequencer from ever holding a reference to the
+ * Minimal synchronous pub/sub, so the sequencer never holds a reference to the
  * audio engine or the UI. A step is published; whoever cares subscribes.
  */
 export class EventBus {

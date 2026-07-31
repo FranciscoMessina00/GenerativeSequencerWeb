@@ -144,7 +144,7 @@ try {
   // --- 7. a full sequence through the real Track + voice pool ------------
   {
     const track = new Track(0, new Rng(2024));
-    for (const [k, v] of Object.entries({ steps: 16, pulses: 5, probability: 0.3, logicOp: 1, glide: 0.4 })) track.setParam(k, v);
+    for (const [k, v] of Object.entries({ steps: 16, pulses: 5, probability: 0.3, logicOp: 1, glideAmount: 0.4 })) track.setParam(k, v);
     const stepDur = 60 / (160 * 4);
     const b = await render(6, (modal) => {
       let t = 0.05, fired = 0;

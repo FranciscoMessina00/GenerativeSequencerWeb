@@ -1,13 +1,13 @@
 /**
  * A periodic callback that keeps firing when the tab is in the background.
  *
- * Browsers throttle main-thread `setInterval` to once a second or slower in
- * hidden tabs, which would starve the lookahead scheduler and stall the
- * sequence. Worker timers are not throttled the same way, so the interval lives
- * in a Worker built from a Blob URL -- no extra file to serve, and no build step.
+ * Browsers throttle main-thread `setInterval` to once a second or slower in hidden
+ * tabs, which would starve the lookahead scheduler and stall the sequence. Worker
+ * timers are not throttled the same way, so the interval lives in a Worker built
+ * from a Blob URL -- no extra file to serve, no build step.
  *
- * The Worker only says "now"; it holds no musical state. All scheduling
- * decisions stay on the main thread where the generators live.
+ * The Worker only says "now" and holds no musical state; all scheduling decisions
+ * stay on the main thread with the generators.
  */
 
 const WORKER_SOURCE = `
@@ -32,7 +32,10 @@ export class Ticker {
 
     try {
       const blob = new Blob([WORKER_SOURCE], { type: 'application/javascript' });
-      this.worker = new Worker(URL.createObjectURL(blob));
+      const url = URL.createObjectURL(blob);
+      this.worker = new Worker(url);
+      // The worker keeps running once constructed, so the URL can go immediately.
+      URL.revokeObjectURL(url);
       this.worker.onmessage = () => this.onTick?.();
     } catch (err) {
       // Workers may be unavailable (strict CSP, exotic environment). A

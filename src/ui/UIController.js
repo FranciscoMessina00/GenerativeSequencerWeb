@@ -2,11 +2,11 @@ import { PARAM_SCHEMA } from '../core/paramSchema.js';
 import { LOGIC_OP_NAMES } from '../sequencer/logic.js';
 import { SCALE_NAMES } from '../sequencer/scales.js';
 import { DragNumber } from './DragNumber.js';
+import { formatNumber } from './numberUtils.js';
 
 /**
  * Builds the control surface from the param schema and publishes changes to the
- * bus. Deliberately plain -- sliders, checkboxes and a readout -- because phase 1
- * is about verifying the engine, not about looking like the Processing GUI.
+ * bus.
  *
  * The UI never touches the sequencer or the audio engine directly; it only emits
  * `param:change`. That is what makes the same control surface work unchanged when
@@ -27,8 +27,7 @@ export class UIController {
     if (spec.display === 'logic') return LOGIC_OP_NAMES[Math.round(value) - 1] ?? '?';
     if (spec.display === 'scale') return SCALE_NAMES[Math.round(value) - 1] ?? '?';
     if (spec.type === 'toggle') return value ? 'on' : 'off';
-    const decimals = spec.step >= 1 ? 0 : spec.step >= 0.01 ? 2 : 3;
-    return Number(value).toFixed(decimals);
+    return formatNumber(Number(value), spec.step);
   }
 
   #emit(key, value) {
@@ -38,14 +37,9 @@ export class UIController {
   /**
    * Render the named groups as slider panels into `container`.
    *
-   * Rendering is split by target rather than done in one pass, because some
-   * params live inside the step ring and the rest live in the side panel. Keys in
-   * `skip` are omitted so they can be rendered elsewhere without appearing twice.
-   *
-   * `prepend` inserts a custom widget (e.g. a BiasSpreadSlider) at the top of a
-   * named group's panel, before its remaining sliders -- used where a group's
-   * bias and spread params are better driven by one combined control than by
-   * two separate sliders.
+   * `skip` omits keys so they can be rendered elsewhere without appearing twice --
+   * some params live inside the step ring rather than the side panel. `prepend`
+   * puts a custom widget (e.g. a BiasSpreadSlider) at the top of a group.
    */
   renderGroups(container, groupNames, { skip = [], prepend = {} } = {}) {
     const skipped = new Set(skip);
@@ -71,10 +65,9 @@ export class UIController {
   }
 
   /**
-   * Render the given keys as drag-numbers, with no group chrome.
-   *
-   * Used for the Euclidean parameters inside the ring, where a heading and slider
-   * tracks would not fit and would compete with the pattern itself for attention.
+   * Render the given keys as drag-numbers, with no group chrome -- for the
+   * Euclidean params inside the ring, where slider tracks would not fit and would
+   * compete with the pattern itself for attention.
    */
   renderDragNumbers(container, keys) {
     for (const key of keys) {
@@ -136,11 +129,9 @@ export class UIController {
   }
 
   /**
-   * Live readout of the last few steps.
-   *
-   * This is the main verification instrument: it shows the Euclidean bit, the
-   * random/loop bit and the resulting trigger side by side, so a disagreement
-   * between them immediately identifies which stage is misbehaving.
+   * Live readout of the last few steps: the Euclidean bit, the random/loop bit and
+   * the resulting trigger side by side, so a disagreement between them identifies
+   * which stage is misbehaving.
    */
   attachReadout(element, maxRows = 14) {
     this.readout = element;

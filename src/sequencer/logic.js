@@ -1,9 +1,7 @@
 /**
  * The logic operators that combine the Euclidean step with the random/loop bit.
  *
- * Indices are 1-based to match the original's `~op` knob
- * (`TriggerWithGlide.scd:291-351`) and the labels drawn by the Processing GUI
- * (`Vista.pde:297-310`).
+ * Ids are 1-based because the control that selects them is a 1..4 integer param.
  */
 
 export const LOGIC_OPS = [
@@ -15,10 +13,7 @@ export const LOGIC_OPS = [
 
 export const LOGIC_OP_NAMES = LOGIC_OPS.map((op) => op.name);
 
-/**
- * Apply operator `id` to two bits. Unknown ids fall back to OR, matching the
- * source's `case` which leaves `~trigg` untouched rather than erroring.
- */
+/** Apply operator `id` to two bits. Unknown ids fall back to OR rather than throw. */
 export function applyLogic(id, euclidBit, randomBit) {
   const op = LOGIC_OPS[Math.floor(id) - 1] ?? LOGIC_OPS[0];
   return op.apply(Boolean(euclidBit), Boolean(randomBit));

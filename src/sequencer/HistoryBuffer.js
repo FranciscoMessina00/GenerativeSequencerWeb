@@ -1,26 +1,17 @@
 import { permute, permutationIndex } from './permute.js';
 
 /**
- * The shift register at the heart of every generator in this instrument.
+ * The shift register every generator is built on: a 32-slot array rotated left by
+ * one each step, with a fresh value written at a fixed index and then *read one
+ * slot behind the write head*. That off-by-one is deliberate -- a step consumes
+ * the value generated on the step before, and that latency is part of the feel.
  *
- * All four generators in the original (trigger, note, velocity, modulation) use
- * the identical mechanism: a 32-slot array that is rotated left by one on every
- * step, has a fresh value written at a fixed index, and is then *read one slot
- * behind the write head*. That off-by-one is not a bug -- it means the value
- * consumed on a step was generated on the previous step, and the resulting
- * one-step latency is part of the instrument's feel. See
- * `TriggerWithGlide.scd:305-309` (trigger) and `:398-400` (notes).
- *
- * Because the array is rotated physically, its layout encodes chronology:
- * writeIndex holds the newest value, writeIndex-1 the one before, and so on
- * down through 0 and then wrapping to size-1. Loop capture takes `slice(0, n)`
- * off that layout, so it grabs a window of *older* history rather than the most
- * recent values -- again faithful to `TriggerWithGlide.scd:75`.
+ * Rotating physically means the layout encodes chronology: writeIndex holds the
+ * newest value, writeIndex-1 the one before, wrapping down through 0. Loop capture
+ * slices off the front, so it deliberately grabs *older* history.
  */
 export class HistoryBuffer {
   /**
-   * @param {object} opts
-   * @param {number} opts.size        slots in the register (32 in the original)
    * @param {number} opts.writeIndex  where fresh values land (15 for triggers, 31 otherwise)
    * @param {Function} opts.fill      () => initial value for each slot
    */
@@ -58,21 +49,12 @@ export class HistoryBuffer {
   }
 
   /**
-   * Re-snapshot the loop from live history.
+   * Re-snapshot the loop from live history, on every change to length,
+   * permutation, or the toggle. Re-capturing rather than freezing once is what
+   * keeps loop mode alive: the loop is always built from recent material.
    *
-   * Called whenever loop length, permutation index, or the loop toggle changes
-   * (`TriggerWithGlide.scd:72-93`). Re-capturing on every change rather than
-   * freezing once is what keeps loop mode feeling alive: the loop is always
-   * built out of material the generator has recently produced.
-   *
-   * `permNormalized` is a 0..1 knob position, scaled to a permutation index
-   * against the loop's own length -- see permutationIndex().
-   *
-   * `loopStepCount` is deliberately left untouched here -- see advanceLoop().
-   * The loop's *content* already comes back identical on its own whenever you
-   * return to a (length, permutation) pair you've used before, since it's a
-   * pure function of the frozen history underneath; the phase is the only
-   * part that needs this care.
+   * `permNormalized` is a 0..1 knob position -- see permutationIndex().
+   * `loopStepCount` is deliberately left untouched; see advanceLoop().
    */
   captureLoop(length, permNormalized = 0) {
     this.loopLength = Math.max(1, Math.min(this.size, Math.floor(length)));
@@ -80,23 +62,16 @@ export class HistoryBuffer {
       this.data.slice(0, this.loopLength),
       permutationIndex(permNormalized, this.loopLength),
     );
-    // Source reads `loopLength - 2` clipped into range; for length 1 that
-    // clamps to 0, which correctly yields a one-value repeat.
+    // Clamped, so length 1 lands on 0 and yields a one-value repeat.
     this.loopReadIndex = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 2));
   }
 
   /**
-   * Advance the loop by one step.
-   *
-   * Counts absolute steps rather than storing a phase already folded into the
-   * current length. Folding early is lossy: once the count has been reduced
-   * mod a shorter length, the higher-order information needed to resume a
-   * longer length correctly is gone, so returning to a length you'd visited
-   * before would land on a different point in its cycle than if you'd never
-   * left. Folding only at read time (see loopCurrent/loopPrevious) means every
-   * length has its own always-correct phase, recoverable from the one shared
-   * count no matter what other lengths were visited in between -- as if each
-   * length's cycle had simply kept running in the background the whole time.
+   * Advance the loop by one step, counting absolute steps rather than a phase
+   * folded into the current length. Folding early is lossy: reduced mod a shorter
+   * length, the information needed to resume a longer one is gone. Folding at read
+   * time instead gives every length its own correct phase from one shared count,
+   * as if each length's cycle had kept running in the background all along.
    */
   advanceLoop() {
     if (this.loopLength <= 1) return;
@@ -109,11 +84,9 @@ export class HistoryBuffer {
   }
 
   /**
-   * Glide origin while looping. The source indexes `loopLength - 3` unclipped
-   * (`TriggerWithGlide.scd:388`), which goes negative for loops shorter than 3
-   * and hands SuperCollider a nil -- an error the original only avoids because
-   * zero glide short-circuits before the read. Clamped here so short loops
-   * glide to themselves instead of breaking.
+   * Glide origin while looping. The natural index here is `loopLength - 3`, which
+   * goes negative for loops shorter than 3 -- clamped, so short loops glide to
+   * themselves rather than reading off the end.
    */
   get loopPrevious() {
     const phase = this.loopStepCount % this.loopLength;
