@@ -1,0 +1,276 @@
+<!doctype html>
+<!-- Manual check for the rhythm row's three icon controls: the cycling logic gate, the
+     drag-to-fill dice, and the loop cluster whose toggle dims the permutation. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+#mount{width:340px;}</style>
+</head>
+<body>
+<div id="mount"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { FULL_RANGE_PX } from '../../src/ui/DragNumber.js';
+import { FillIconControl } from '../../src/ui/FillIconControl.js';
+import { LogicOpControl } from '../../src/ui/LogicOpControl.js';
+import { TrigLoopControl } from '../../src/ui/TrigLoopControl.js';
+import { diceIcon } from '../../src/ui/icons.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const bus = new EventBus();
+const events = [];
+bus.on('param:change', (e) => events.push(e));
+const emitted = () => events.map((e) => e.value).join(',');
+
+// Mirrors of the real paramSchema entries, so the widgets are exercised on the same
+// shapes they get in the app.
+const logicSpec = { key: 'logicOp', label: 'Logic Operator', min: 1, max: 4, step: 1, def: 1 };
+const probSpec = { key: 'probability', label: 'Trig Probability', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' };
+const loopSpec = { key: 'trigLoop', label: 'Trig Loop', type: 'toggle', def: false };
+const lenSpec = { key: 'trigLoopLength', label: 'Trig Loop Length', short: 'Len', min: 1, max: 32, step: 1, def: 1 };
+const permSpec = { key: 'trigPerm', label: 'Rhythm Permutation', min: 0, max: 1, step: 0.001, def: 0, display: 'percent' };
+
+const logic = new LogicOpControl({
+  spec: logicSpec,
+  onInput: (value) => bus.emit('param:change', { trackId: 0, key: logicSpec.key, value }),
+});
+const prob = new FillIconControl({
+  spec: probSpec,
+  buildIcon: diceIcon,
+  label: 'Prob',
+  onInput: (value) => bus.emit('param:change', { trackId: 0, key: probSpec.key, value }),
+});
+const loop = new TrigLoopControl({
+  bus, trackId: 0, enabledSpec: loopSpec, lengthSpec: lenSpec, permSpec,
+});
+
+const row = document.createElement('div');
+row.className = 'trig-row';
+row.append(logic.element, prob.element, loop.element);
+document.getElementById('mount').appendChild(row);
+
+// ---------------------------------------------------------------------------
+// Logic operator: cycles, and each operator draws a different glyph
+// ---------------------------------------------------------------------------
+log('-- logic operator --');
+check('starts at the default', logic.labelEl.textContent, 'OR');
+check('aria-label carries the value', logic.element.getAttribute('aria-label'), 'Logic Operator: OR');
+
+/** Tag names plus the first path, so the check survives the geometry being retuned. */
+const glyphSignature = () => {
+  const svg = logic.iconEl.firstElementChild;
+  const tags = [...svg.children].map((c) => c.tagName).join('+');
+  return `${tags}|${svg.querySelector('path')?.getAttribute('d') ?? ''}`;
+};
+
+const names = [];
+const signatures = new Set([glyphSignature()]);
+for (let i = 0; i < 4; i += 1) {
+  logic.element.click();
+  names.push(logic.labelEl.textContent);
+  signatures.add(glyphSignature());
+}
+check('four clicks cycle the operators', names.join(','), 'AND,XOR,NAND,OR');
+check('four clicks emit the ids in order', emitted(), '2,3,4,1');
+check('all four gates draw distinct glyphs', signatures.size, 4);
+
+events.length = 0;
+logic.setValue(3);
+check('setValue moves the label', logic.labelEl.textContent, 'XOR');
+check('setValue does not emit', emitted(), '');
+logic.setValue(1);
+
+// ---------------------------------------------------------------------------
+// Fill icon: the level, in the custom property and in the computed clip
+// ---------------------------------------------------------------------------
+log('\n-- fill level --');
+const fillEl = prob.element.querySelector('.fillicon__fill');
+const fillTop = () => prob.element.style.getPropertyValue('--fill-top');
+/**
+ * The percentage the browser actually resolved the clip to.
+ *
+ * Parsed rather than substring-matched: `clipPath.includes('0%')` is true of
+ * `inset(100% ...)` as well, so a containment check would pass whatever the level was.
+ */
+const clipTop = () => parseFloat(getComputedStyle(fillEl).clipPath.match(/-?[\d.]+/)?.[0] ?? 'NaN');
+
+check('empty at the minimum', fillTop(), '100.00%');
+check('the clip really reads the property', clipTop(), 100);
+
+prob.setValue(0.35);
+check('a third full hides two thirds', fillTop(), '65.00%');
+check('computed clip follows', clipTop(), 65);
+
+prob.setValue(1);
+check('full at the maximum', fillTop(), '0.00%');
+check('nothing clipped when full', clipTop(), 0);
+
+prob.setValue(0.5);
+check('halfway clips exactly half', clipTop(), 50);
+
+prob.setValue(0);
+check('setValue never emits', emitted(), '');
+
+// The two layers must sit exactly on top of each other, or the fill would be offset
+// from the glyph it is supposed to be filling.
+const baseBox = prob.element.querySelector('.fillicon__base').getBoundingClientRect();
+const fillBox = fillEl.getBoundingClientRect();
+check('layers share an origin', `${Math.round(baseBox.x - fillBox.x)},${Math.round(baseBox.y - fillBox.y)}`, '0,0');
+
+log('\n-- caption/value peek --');
+const captionText = () => prob.element.querySelector('.fillicon__label').textContent;
+prob.setValue(0.35);
+check('caption shows at rest', captionText(), 'Prob');
+
+prob.element.dispatchEvent(new PointerEvent('pointerenter', { pointerId: 1, bubbles: true }));
+check('hovering swaps in the percentage', captionText(), '35%');
+prob.element.dispatchEvent(new PointerEvent('pointerleave', { pointerId: 1, bubbles: true }));
+check('leaving swaps the caption back', captionText(), 'Prob');
+
+// Same stub as the earlier drag block: a synthesised drag has no real pointer id, so
+// setPointerCapture is parked for the duration.
+{
+  const el = prob.element;
+  const capture = el.setPointerCapture;
+  el.setPointerCapture = () => {};
+  el.hasPointerCapture = () => false;
+  const at = (type, clientY) => el.dispatchEvent(new PointerEvent(type, {
+    pointerId: 1, button: 0, clientY, bubbles: true, cancelable: true,
+  }));
+  at('pointerdown', 300);
+  check('the peek appears the instant a drag starts', captionText(), '35%');
+  at('pointermove', 300 - FULL_RANGE_PX);
+  check('...and tracks the value as it moves', captionText(), '100%');
+  at('pointerup', 300 - FULL_RANGE_PX);
+  el.setPointerCapture = capture;
+}
+check('releasing (mouse never re-entered) reverts to the caption', captionText(), 'Prob');
+prob.setValue(0);
+
+// ---------------------------------------------------------------------------
+// Fill icon: gestures
+// ---------------------------------------------------------------------------
+log('\n-- fill gestures --');
+// Pointer capture needs a real pointer id, which a synthesised event has not got, so it
+// is stubbed out for the duration of the fake drag.
+const drag = (el, dy, { shiftKey = false } = {}) => {
+  const capture = el.setPointerCapture;
+  el.setPointerCapture = () => {};
+  el.hasPointerCapture = () => false;
+  const at = (type, clientY) => el.dispatchEvent(new PointerEvent(type, {
+    pointerId: 1, button: 0, clientY, shiftKey, bubbles: true, cancelable: true,
+  }));
+  at('pointerdown', 300);
+  at('pointermove', 300 - dy);
+  at('pointerup', 300 - dy);
+  el.setPointerCapture = capture;
+};
+
+prob.setValue(0);
+events.length = 0;
+drag(prob.element, FULL_RANGE_PX);
+check('one full sweep reaches the maximum', prob.value, 1);
+
+prob.setValue(0);
+drag(prob.element, FULL_RANGE_PX / 2);
+check('half a sweep reaches halfway', prob.value, 0.5);
+
+prob.setValue(0.5);
+drag(prob.element, -FULL_RANGE_PX / 2);
+check('dragging down lowers it', prob.value, 0);
+
+prob.setValue(0);
+drag(prob.element, FULL_RANGE_PX / 2, { shiftKey: true });
+check('shift is eight times finer', prob.value, 0.06);
+
+prob.setValue(0.4);
+events.length = 0;
+drag(prob.element, 0);
+check('a press with no movement emits nothing', emitted(), '');
+check('...and leaves the value alone', prob.value, 0.4);
+
+prob.element.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+check('double click restores the default', prob.value, probSpec.def);
+
+prob.setValue(0.5);
+prob.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+check('arrow up nudges one step', prob.value, 0.51);
+prob.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+check('End reaches the maximum', prob.value, 1);
+prob.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }));
+check('Home reaches the minimum', prob.value, 0);
+
+log('aria-valuetext at 0.35: ' + (prob.setValue(0.35), prob.element.getAttribute('aria-valuetext')));
+
+// ---------------------------------------------------------------------------
+// Loop cluster: the toggle gates the permutation's dimming
+// ---------------------------------------------------------------------------
+log('\n-- loop cluster --');
+const permEl = loop.permControl.element;
+const dimmed = () => permEl.classList.contains('is-inactive');
+
+check('permutation starts dimmed, loop off by default', dimmed(), 'true');
+check('toggle starts unlit', loop.toggleButton.classList.contains('is-active'), 'false');
+check('aria-pressed starts false', loop.toggleButton.getAttribute('aria-pressed'), 'false');
+
+events.length = 0;
+loop.toggleButton.click();
+check('clicking lights the toggle', loop.toggleButton.classList.contains('is-active'), 'true');
+check('...and un-dims the permutation', dimmed(), 'false');
+check('...and emits true', emitted(), 'true');
+
+loop.toggleButton.click();
+check('clicking again re-dims it', dimmed(), 'true');
+
+// The same path a loaded patch takes -- the state must land identically to a click.
+loop.setValue('trigLoop', true);
+check('setValue un-dims it too', dimmed(), 'false');
+check('setValue lights the toggle too', loop.toggleButton.classList.contains('is-active'), 'true');
+check('setValue keeps aria-pressed honest', loop.toggleButton.getAttribute('aria-pressed'), 'true');
+loop.setValue('trigLoop', false);
+check('setValue re-dims it', dimmed(), 'true');
+
+events.length = 0;
+check('length starts at the default', loop.lengthControl.value, 1);
+loop.setValue('trigLoopLength', 8);
+check('length reflects an external change', loop.lengthControl.valueEl.textContent, '8');
+loop.setValue('trigPerm', 0.25);
+check('permutation reflects one too', permEl.style.getPropertyValue('--fill-top'), '75.00%');
+check('neither setValue emitted', emitted(), '');
+
+// Permutation's step is 0.001, ten times finer than probability's, so whole percents
+// would barely move as it is dragged. The spoken form follows the step.
+loop.setValue('trigPerm', 0.125);
+check('a finer step is spoken to a tenth', permEl.getAttribute('aria-valuetext'), '12.5%');
+check('while probability speaks whole percents', prob.element.getAttribute('aria-valuetext'), '35%');
+
+check('the cluster owns three keys', loop.keys().join(','), 'trigLoop,trigLoopLength,trigPerm');
+
+// ---------------------------------------------------------------------------
+// Layout: nothing spills out of the row
+// ---------------------------------------------------------------------------
+log('\n-- layout --');
+const rowBox = row.getBoundingClientRect();
+const spills = [...row.children].filter((child) => {
+  const b = child.getBoundingClientRect();
+  return b.left < rowBox.left - 0.5 || b.right > rowBox.right + 0.5
+    || b.top < rowBox.top - 0.5 || b.bottom > rowBox.bottom + 0.5;
+});
+check('every control sits inside the row', spills.length, 0);
+log(`row ${Math.round(rowBox.width)}x${Math.round(rowBox.height)}px; children ${
+  [...row.children].map((c) => Math.round(c.getBoundingClientRect().width)).join(' + ')}px`);
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'trigger-check-done' : 'trigger-check-failed';
+</script>
+</body>
+</html>

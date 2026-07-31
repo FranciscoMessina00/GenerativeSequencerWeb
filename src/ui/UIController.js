@@ -1,5 +1,4 @@
 import { PARAM_SCHEMA } from '../core/paramSchema.js';
-import { LOGIC_OP_NAMES } from '../sequencer/logic.js';
 import { SCALE_NAMES } from '../sequencer/scales.js';
 import { noteValueLabel, stepModById } from '../sequencer/stepDivision.js';
 import { DragNumber } from './DragNumber.js';
@@ -25,7 +24,6 @@ export class UIController {
 
   /** Human-readable value for the enum-ish params, which are integers on the wire. */
   #formatValue(spec, value) {
-    if (spec.display === 'logic') return LOGIC_OP_NAMES[Math.round(value) - 1] ?? '?';
     if (spec.display === 'scale') return SCALE_NAMES[Math.round(value) - 1] ?? '?';
     if (spec.display === 'noteValue') return noteValueLabel(value);
     if (spec.display === 'stepMod') return stepModById(value).name;

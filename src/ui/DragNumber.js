@@ -15,9 +15,15 @@
 
 import { quantize } from './numberUtils.js';
 
-/** Travel, in pixels, for one full sweep of the parameter's range. */
-const FULL_RANGE_PX = 180;
-const FINE_DIVISOR = 8;
+/**
+ * Travel, in pixels, for one full sweep of the parameter's range.
+ *
+ * Exported because FillIconControl drags the same way. Two drag controls on one panel
+ * that answered differently to the same hand movement would feel like a bug, so they
+ * share the constant rather than each declaring 180.
+ */
+export const FULL_RANGE_PX = 180;
+export const FINE_DIVISOR = 8;
 
 export class DragNumber {
   /**

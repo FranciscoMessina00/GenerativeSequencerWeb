@@ -45,11 +45,15 @@ index.html
         └─ ui/                  ← User interface
             ├─ UIController.js ←   Builds control surface from schema
             ├─ EuclidView.js   ←   Canvas Euclidean ring display
+            ├─ icons.js        ←   Line-art SVG glyphs
             ├─ BiasSpreadSlider.js
             ├─ DragNumber.js
             ├─ Dropdown.js
+            ├─ FillIconControl.js
             ├─ GlideControl.js
+            ├─ LogicOpControl.js
             ├─ StepDivisionControl.js
+            ├─ TrigLoopControl.js
             ├─ numberUtils.js
             └─ noteNames.js
 ```
@@ -97,6 +101,50 @@ sounds like neither. One value makes it unrepresentable rather than merely disco
 
 Each track carries its own accumulator in the Scheduler, so a slow track simply emits
 fewer steps per lookahead window than a fast one.
+
+## Rhythm controls
+
+The rhythm row under the ring is glyphs rather than sliders, because none of these four
+parameters is a magnitude worth reading to two decimals:
+
+```
+    ⟩         ⚄         ⟳    8       ⤬
+   OR        PROB      LOOP  LEN     PERM
+```
+
+| Glyph | Parameter | Gesture |
+|---|---|---|
+| Logic gate | `logicOp` | click cycles OR → AND → XOR → NAND |
+| Die | `probability` | drag up to fill; how full it is *is* the value |
+| Loop arrows | `trigLoop` + `trigLoopLength` | click captures the loop, drag the number for its length |
+| Crossed arrows | `trigPerm` | drag up to fill, like the die |
+
+**The logic operator cycles rather than slides.** Four named operators are a choice, not
+a quantity, and a 1..4 slider asks the hand to treat a category as a magnitude. The
+schematic symbol says which control it is; the caption says what it is set to, because at
+24px the differences that matter — XOR's second arc, NAND's bubble — are as small as they
+are on a real schematic. `nextLogicOp` lives in [`logic.js`](src/sequencer/logic.js) next
+to the table it walks: the operator ids are positional and patches store them, so a
+reordering would silently remap every saved patch.
+
+**The fills are two copies of one glyph.** The lower is dim, the upper is accent-coloured
+and clipped to `inset(var(--fill-top) 0 0 0)`, with JS setting that custom property from
+the value. Cheaper than an SVG `<clipPath>`, which would need a document-unique id per
+instance, and it leaves the level as a plain percentage a test can read back. Both glyphs
+are drawn symmetric about the horizontal axis so a bottom-up fill reads as a level rather
+than as a smear. The clip is deliberately untransitioned — during a drag it has to track
+the pointer, and an eased clip would lag behind the hand.
+
+**Permutation dims while the loop is off.** Its value is scaled by the loop's factorial,
+so with nothing captured it has no effect at all. Dimming says so without disabling it:
+the value is kept and starts mattering the moment the loop comes on. That coupling is why
+one control owns all three loop parameters — it is internal state, not a special case in
+the wiring.
+
+Gestures match [`DragNumber`](src/ui/DragNumber.js) exactly, sharing its `FULL_RANGE_PX`
+and `FINE_DIVISOR` rather than restating them: drag for coarse, shift-drag eight times
+finer, wheel by one step, arrows and `Home`/`End`, double-click back to the default. A
+press without movement changes nothing, so a glyph can be clicked to focus it.
 
 ## Parameter flow
 
@@ -225,7 +273,7 @@ darker tail of a real string; `damping = 0` makes all modes decay together.
 | `src/core/` | Event bus, PRNG, parameter schema |
 | `src/sequencer/` | Clock scheduling, track generators, rhythm & pitch logic |
 | `src/audio/` | AudioContext management, modal string model, AudioWorklets |
-| `src/ui/` | Canvas GUI, custom controls (sliders, drag-numbers, dropdowns) |
+| `src/ui/` | Canvas GUI, custom controls (sliders, drag-numbers, icon controls) |
 | `presets/` | Factory patches, fetched at startup |
 | `test/` | Node.js native test suite |
 | `styles/` | Application CSS |
@@ -239,8 +287,13 @@ npm run serve    # Python HTTP server on port 8080
 ## Test
 
 ```bash
-npm test         # Node native test runner, 127 tests, no dependencies
+npm test         # Node native test runner, 141 tests, no dependencies
 ```
+
+The custom controls need a DOM, so they are checked by mounted pages rather than in Node.
+Serve the project root and open `/test/browser/trigger-controls-check.html` (the rhythm
+glyphs) or `/test/browser/glide-control-check.html`; each prints its results and stops on
+`ALL CHECKS DONE`.
 
 ## Types
 

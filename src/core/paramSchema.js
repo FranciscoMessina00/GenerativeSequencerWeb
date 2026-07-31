@@ -11,8 +11,9 @@ export const PARAM_SCHEMA = [
   // ---- Rhythm -------------------------------------------------------------
   // 5-in-16 by default, so the instrument makes a recognisable pattern on first
   // load rather than a flat 16th-note pulse.
-  // `short` is what renders inside the step ring, where the surrounding context
-  // already says "Euclid" and repeating it three times only costs space.
+  // `short` is the compact caption, for slots where the surrounding context already
+  // supplies the noun -- inside the step ring the panel already says "Euclid", so
+  // repeating it three times only costs space.
   { key: 'steps', label: 'Euclid Steps', short: 'Steps', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 16 },
   { key: 'pulses', label: 'Euclid Triggers', short: 'Pulses', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 5 },
   { key: 'rotation', label: 'Euclid Rotation', short: 'Rotation', group: 'Rhythm', target: 'track', min: 0, max: 32, step: 1, def: 0 },
@@ -26,12 +27,15 @@ export const PARAM_SCHEMA = [
   // 0 straight, 1 triplet, 2 dotted. One tri-state value rather than two toggles,
   // because triplet and dotted together cancel to straight -- see stepDivision.js.
   { key: 'stepMod', label: 'Step Modifier', group: 'Rhythm', target: 'track', values: [0, 1, 2], min: 0, max: 2, step: 1, def: 0, display: 'stepMod' },
-  { key: 'logicOp', label: 'Logic Operator', group: 'Rhythm', target: 'track', min: 1, max: 4, step: 1, def: 1, display: 'logic' },
-  { key: 'probability', label: 'Trig Probability', group: 'Rhythm', target: 'track', min: 0, max: 1, step: 0.01, def: 0 },
+  // These five are drawn as glyphs rather than sliders -- see ui/LogicOpControl.js and
+  // ui/TrigLoopControl.js -- so `display` and `short` reach aria text and captions only.
+  // logicOp needs no `display`: its control takes the operator names from LOGIC_OPS.
+  { key: 'logicOp', label: 'Logic Operator', group: 'Rhythm', target: 'track', min: 1, max: 4, step: 1, def: 1 },
+  { key: 'probability', label: 'Trig Probability', group: 'Rhythm', target: 'track', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' },
   { key: 'trigLoop', label: 'Trig Loop', group: 'Rhythm', target: 'track', type: 'toggle', def: false },
-  { key: 'trigLoopLength', label: 'Trig Loop Length', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 1 },
+  { key: 'trigLoopLength', label: 'Trig Loop Length', group: 'Rhythm', short: 'Len', target: 'track', min: 1, max: 32, step: 1, def: 1 },
   // Normalised, then scaled by the loop's factorial -- see permutationIndex().
-  { key: 'trigPerm', label: 'Rhythm Permutation', group: 'Rhythm', target: 'track', min: 0, max: 1, step: 0.001, def: 0 },
+  { key: 'trigPerm', label: 'Rhythm Permutation', group: 'Rhythm', target: 'track', min: 0, max: 1, step: 0.001, def: 0, display: 'percent' },
 
   // ---- Pitch --------------------------------------------------------------
   // Note bias/spread are integer-only and shown as note names / semitone counts

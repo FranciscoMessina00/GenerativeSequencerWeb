@@ -1,14 +1,12 @@
 import { DragNumber } from './DragNumber.js';
+import { svgEl } from './icons.js';
 import { formatNumber } from './numberUtils.js';
 
-const NS = 'http://www.w3.org/2000/svg';
-function svgEl(tag, attrs) {
-  const el = document.createElementNS(NS, tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  return el;
-}
-
-/** The two glide-mode glyphs: a straight 45deg line (linear), a quadratic curve (exponential). */
+/**
+ * The two glide-mode glyphs: a straight 45deg line (linear), a quadratic curve
+ * (exponential). Built here rather than in icons.js because they mean nothing outside
+ * glide, the same way each control keeps its own value formatting.
+ */
 function buildModeIcon(exponential) {
   const svg = svgEl('svg', { viewBox: '0 0 12 12', class: 'glide-control__icon' });
   const shape = exponential

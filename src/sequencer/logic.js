@@ -18,3 +18,17 @@ export function applyLogic(id, euclidBit, randomBit) {
   const op = LOGIC_OPS[Math.floor(id) - 1] ?? LOGIC_OPS[0];
   return op.apply(Boolean(euclidBit), Boolean(randomBit));
 }
+
+/**
+ * The next operator in the cycle, wrapping past the last back to the first.
+ *
+ * Here rather than in the control that clicks through it, because the order is not a
+ * presentation choice: the ids are positional and patches store them, so a reordering
+ * would silently remap every saved patch. Keeping the cycle beside the table it walks
+ * means the two cannot drift apart.
+ */
+export function nextLogicOp(id) {
+  const index = LOGIC_OPS.findIndex((op) => op.id === Math.floor(Number(id)));
+  // An unrecognised id lands on the first operator, matching applyLogic's fallback.
+  return LOGIC_OPS[(index + 1) % LOGIC_OPS.length].id;
+}

@@ -14,6 +14,10 @@ import { BiasSpreadSlider } from './ui/BiasSpreadSlider.js';
 import { Dropdown } from './ui/Dropdown.js';
 import { GlideControl } from './ui/GlideControl.js';
 import { StepDivisionControl } from './ui/StepDivisionControl.js';
+import { LogicOpControl } from './ui/LogicOpControl.js';
+import { FillIconControl } from './ui/FillIconControl.js';
+import { TrigLoopControl } from './ui/TrigLoopControl.js';
+import { diceIcon } from './ui/icons.js';
 import { SCALES } from './sequencer/scales.js';
 
 /**
@@ -86,10 +90,41 @@ const stepDivisionControl = new StepDivisionControl({
   modSpec: paramSpec('stepMod'),
 });
 hubEl.appendChild(stepDivisionControl.element);
-// The rest of the rhythm controls sit under the ring; everything else goes in the
-// side panel.
+
+// The rest of the rhythm controls sit under the ring, as one row of glyphs: how the
+// Euclidean bit combines with the random one, how often that bit is set, and the loop
+// that can freeze and reorder it. None of the four is a magnitude worth reading to two
+// decimals, which is why none of them is a slider.
+const TRIG_KEYS = ['logicOp', 'probability', 'trigLoop', 'trigLoopLength', 'trigPerm'];
+
+const logicOpControl = new LogicOpControl({
+  spec: paramSpec('logicOp'),
+  onInput: (value) => bus.emit('param:change', { trackId: VISIBLE_TRACK, key: 'logicOp', value }),
+});
+const probabilityControl = new FillIconControl({
+  spec: paramSpec('probability'),
+  buildIcon: diceIcon,
+  label: 'Prob',
+  onInput: (value) => bus.emit('param:change', { trackId: VISIBLE_TRACK, key: 'probability', value }),
+});
+const trigLoopControl = new TrigLoopControl({
+  bus,
+  trackId: VISIBLE_TRACK,
+  enabledSpec: paramSpec('trigLoop'),
+  lengthSpec: paramSpec('trigLoopLength'),
+  permSpec: paramSpec('trigPerm'),
+});
+
+const trigRow = document.createElement('div');
+trigRow.className = 'trig-row';
+trigRow.append(logicOpControl.element, probabilityControl.element, trigLoopControl.element);
+
+// Every Rhythm param is now drawn by a purpose-built control, so the group renders as
+// nothing but its heading and this row. renderGroups keeps the section because `prepend`
+// is present even though no schema control survives the skip list.
 ui.renderGroups(document.getElementById('rhythm-controls'), ['Rhythm'], {
-  skip: HUB_KEYS,
+  skip: [...HUB_KEYS, ...TRIG_KEYS],
+  prepend: { Rhythm: trigRow },
 });
 // Bias/spread pairs get one combined slider instead of two: the handle is the
 // bias, the wheel adjusts spread.
@@ -182,8 +217,11 @@ const registerLeaf = (widget) => {
 registerKeyed(ui);
 registerKeyed(glideControl);
 registerKeyed(stepDivisionControl);
+registerKeyed(trigLoopControl);
 for (const slider of Object.values(biasSpreadSliders)) registerKeyed(slider);
 registerLeaf(scaleDropdown);
+registerLeaf(logicOpControl);
+registerLeaf(probabilityControl);
 
 // A control's gesture is only a *request*; the store decides what actually happens.
 bus.on('param:change', ({ trackId, key, value }) => {
