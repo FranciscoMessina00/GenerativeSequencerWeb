@@ -105,18 +105,84 @@ main {
 
 #ring { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
+/* Four controls, so a 2x2 grid: Steps | Pulses above, Rotation | Division below, keeping
+   the core k-in-n pair together on the top row. Sized in JS to the largest square that
+   fits inside the hub circle.
+
+   Equal `1fr` columns rather than `auto`, so the gutter the two halves align against
+   lands on the ring's centre. With `auto` the columns take their content's width, and
+   the Division cell is wider because it carries the T/D toggles -- which pushed the gutter,
+   and the whole cluster with it, 9px left of centre. */
 .hub {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  align-content: center;
+  justify-items: center;
+  align-items: center;
+  gap: 2px 4px;
+}
+
+/* Tighter than a panel .dragnum: two columns of these have to fit across the hub's
+   inscribed square, and the horizontal padding is the cheapest thing to give up. */
+.hub .dragnum { padding: 3px 4px; }
+.hub .dragnum__label { font-size: 9px; letter-spacing: 0.03em; }
+
+/* Mirrored alignment: the left column's text is flush right and the right column's
+   flush left, so both hug the centre gutter and the four controls read as one cluster
+   rather than four islands.
+
+   Keyed off position rather than parameter on purpose -- the alignment belongs to the
+   column, so reordering the keys keeps it correct. `justify-self` places the box within
+   its column; `align-items` aligns the value against the label inside the box, which is
+   needed too because the label is usually the wider of the two. */
+.hub > :nth-child(odd) { justify-self: end; }
+.hub > :nth-child(odd).dragnum,
+.hub > :nth-child(odd) .dragnum { align-items: flex-end; }
+
+.hub > :nth-child(even) { justify-self: start; }
+.hub > :nth-child(even).dragnum,
+.hub > :nth-child(even) .dragnum { align-items: flex-start; }
+
+/* Set from the measured hub size in main.js rather than a viewport breakpoint, because
+   what matters is the space the ring actually leaves, not how wide the window is. */
+.hub--tight .dragnum__value { font-size: 16px; }
+.hub--tight .dragnum__label { font-size: 7px; }
+.hub--tight .step-division__mod { font-size: 8px; min-width: 11px; }
+
+/* ---- step division: note value plus triplet / dotted ---- */
+
+.step-division {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Stacked, so the pair occupies one value's height instead of widening the cell. */
+.step-division__mods {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  /* Without this, items default to `stretch` and each .dragnum fills the full
-     hub width -- which is also why its own padding looked like it did nothing. */
-  align-items: center;
-  gap: 6px;
+  gap: 2px;
+}
+
+.step-division__mod {
+  padding: 0 2px;
+  min-width: 13px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  font: 600 9px/1.5 ui-monospace, monospace;
+  cursor: pointer;
+}
+.step-division__mod:hover { border-color: var(--accent); color: var(--text); }
+.step-division__mod.is-active {
+  background: rgba(111, 184, 224, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 #rhythm-controls .group {

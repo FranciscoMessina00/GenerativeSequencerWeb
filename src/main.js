@@ -13,6 +13,7 @@ import { EuclidView } from './ui/EuclidView.js';
 import { BiasSpreadSlider } from './ui/BiasSpreadSlider.js';
 import { Dropdown } from './ui/Dropdown.js';
 import { GlideControl } from './ui/GlideControl.js';
+import { StepDivisionControl } from './ui/StepDivisionControl.js';
 import { SCALES } from './sequencer/scales.js';
 
 /**
@@ -66,17 +67,29 @@ const store = new ParamStore({
   },
 });
 
-// The three parameters that define the Euclidean pattern live inside the ring, as
-// drag-numbers, since they are what the ring is a picture of.
+// The parameters that define the Euclidean pattern live inside the ring, since they are
+// what the ring is a picture of. Division joins them because it sets how fast the playhead
+// crosses those sectors. Order fills the 2x2 grid: Steps | Pulses, then Rotation | Division.
 const EUCLID_KEYS = ['steps', 'pulses', 'rotation'];
+const HUB_KEYS = [...EUCLID_KEYS, 'stepDivision', 'stepMod'];
 
 const hubEl = document.getElementById('hub');
 const ui = new UIController({ bus });
 ui.renderDragNumbers(hubEl, EUCLID_KEYS);
+
+// Division is a drag-number plus two letter toggles, so it is built here rather than by
+// renderDragNumbers, and appended as the grid's fourth cell.
+const stepDivisionControl = new StepDivisionControl({
+  bus,
+  trackId: VISIBLE_TRACK,
+  divisionSpec: paramSpec('stepDivision'),
+  modSpec: paramSpec('stepMod'),
+});
+hubEl.appendChild(stepDivisionControl.element);
 // The rest of the rhythm controls sit under the ring; everything else goes in the
 // side panel.
 ui.renderGroups(document.getElementById('rhythm-controls'), ['Rhythm'], {
-  skip: EUCLID_KEYS,
+  skip: HUB_KEYS,
 });
 // Bias/spread pairs get one combined slider instead of two: the handle is the
 // bias, the wheel adjusts spread.
@@ -141,6 +154,10 @@ view = new EuclidView(
     const side = Math.max(60, (innerR * 2) / Math.SQRT2 - 8);
     hubEl.style.width = `${side}px`;
     hubEl.style.height = `${side}px`;
+    // Shrink the controls when the ring itself is small. Keyed off the measured square
+    // rather than a viewport breakpoint, since it is the ring's size that decides
+    // whether four controls fit, and that depends on the column, not the window.
+    hubEl.classList.toggle('hub--tight', side < 150);
   },
 );
 view.setPattern(tracks[VISIBLE_TRACK].getPattern());
@@ -164,6 +181,7 @@ const registerLeaf = (widget) => {
 
 registerKeyed(ui);
 registerKeyed(glideControl);
+registerKeyed(stepDivisionControl);
 for (const slider of Object.values(biasSpreadSliders)) registerKeyed(slider);
 registerLeaf(scaleDropdown);
 
@@ -229,7 +247,7 @@ playButton.addEventListener('click', async () => {
 // A single note on demand, for checking the voice without running the sequence.
 document.getElementById('pluck').addEventListener('click', async () => {
   await ensureAudio();
-  const step = tracks[VISIBLE_TRACK].step(scheduler.stepDuration);
+  const step = tracks[VISIBLE_TRACK].step(scheduler.stepDurationFor(VISIBLE_TRACK));
   audio.noteOn({ ...step, triggered: true, audioTime: audio.currentTime + 0.02 });
   ui.pushStep({ ...step, triggered: true });
 });

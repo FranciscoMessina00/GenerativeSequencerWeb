@@ -16,6 +16,16 @@ export const PARAM_SCHEMA = [
   { key: 'steps', label: 'Euclid Steps', short: 'Steps', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 16 },
   { key: 'pulses', label: 'Euclid Triggers', short: 'Pulses', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 5 },
   { key: 'rotation', label: 'Euclid Rotation', short: 'Rotation', group: 'Rhythm', target: 'track', min: 0, max: 32, step: 1, def: 0 },
+  // How long one step lasts, as a note value -- see sequencer/stepDivision.js.
+  //
+  // `values` marks a param whose allowed set is enumerated rather than a uniform
+  // range. min/max/step are carried alongside on purpose: drag maths, aria bounds and
+  // the range-input path all read them, so only quantisation has to know about
+  // `values`. Stored as the note's denominator, so a bigger number is a shorter step.
+  { key: 'stepDivision', label: 'Step Division', short: 'Division', group: 'Rhythm', target: 'track', values: [1, 2, 4, 8, 16, 32], min: 1, max: 32, step: 1, def: 16, display: 'noteValue' },
+  // 0 straight, 1 triplet, 2 dotted. One tri-state value rather than two toggles,
+  // because triplet and dotted together cancel to straight -- see stepDivision.js.
+  { key: 'stepMod', label: 'Step Modifier', group: 'Rhythm', target: 'track', values: [0, 1, 2], min: 0, max: 2, step: 1, def: 0, display: 'stepMod' },
   { key: 'logicOp', label: 'Logic Operator', group: 'Rhythm', target: 'track', min: 1, max: 4, step: 1, def: 1, display: 'logic' },
   { key: 'probability', label: 'Trig Probability', group: 'Rhythm', target: 'track', min: 0, max: 1, step: 0.01, def: 0 },
   { key: 'trigLoop', label: 'Trig Loop', group: 'Rhythm', target: 'track', type: 'toggle', def: false },
@@ -94,12 +104,35 @@ export function defaultsFor(target) {
   return out;
 }
 
+/**
+ * Nearest member of an enumerated `values` list. Ties resolve downward, matching the
+ * convention in scales.js's nearestInList.
+ */
+function nearestValue(numeric, values) {
+  let best = values[0];
+  let bestDistance = Infinity;
+  for (const candidate of values) {
+    const distance = Math.abs(candidate - numeric);
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 /** Clamp a numeric param to its declared range. Toggles pass through as booleans. */
 export function clampParam(key, value) {
   const spec = byKey.get(key);
   if (!spec) return value;
   if (spec.type === 'toggle') return Boolean(value);
-  return Math.min(spec.max, Math.max(spec.min, Number(value)));
+  const numeric = Number(value);
+  // Enumerated params snap here too, so a value that somehow reaches an engine without
+  // passing through the store still cannot land between allowed settings.
+  if (spec.values) {
+    return Number.isFinite(numeric) ? nearestValue(numeric, spec.values) : spec.def;
+  }
+  return Math.min(spec.max, Math.max(spec.min, numeric));
 }
 
 /** Decimal places implied by a step size, e.g. 0.01 -> 2, 1 -> 0. */
@@ -127,6 +160,8 @@ export function normalizeParam(key, value) {
 
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return spec.def;
+
+  if (spec.values) return nearestValue(numeric, spec.values);
 
   const step = spec.step > 0 ? spec.step : 1;
   const snapped = Math.round(numeric / step) * step;

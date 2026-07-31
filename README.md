@@ -28,6 +28,7 @@ index.html
         │   ├─ logic.js        ←   OR/AND/XOR/NAND logic operators
         │   ├─ permute.js      ←   Lehmer code permutation
         │   ├─ scales.js       ←   10 musical scales + quantisation
+        │   ├─ stepDivision.js←   Note values + triplet/dotted
         │   └─ generators/
         │       ├─ TriggerGenerator.js  ← Rhythm generation
         │       ├─ ValueGenerator.js    ← Note/velocity/modulation
@@ -48,6 +49,7 @@ index.html
             ├─ DragNumber.js
             ├─ Dropdown.js
             ├─ GlideControl.js
+            ├─ StepDivisionControl.js
             ├─ numberUtils.js
             └─ noteNames.js
 ```
@@ -68,6 +70,33 @@ touches the audio engine, and neither has any direct DOM access.
 The scheduler decides each step ~100 ms ahead of the audio clock and stamps it
 with an explicit `audioTime`, so timer jitter shifts *when a note is decided*,
 never *when it sounds*.
+
+## Step division
+
+One tempo, several timelines. The bar length is global, but each track sets its own
+step duration as a note value — `1/1` to `1/32`, with triplet (`T`) and dotted (`D`) —
+so two tracks can run at different speeds against the same clock:
+
+```
+barSeconds   = 240 / bpm                        (4/4)
+stepDuration = barSeconds / stepDivision * modFactor   straight 1 · triplet ⅔ · dotted 1.5
+```
+
+The division is stored as the note's **denominator**, which makes a larger number a
+shorter step — so the list's numeric order matches "drag up for faster". The default `1/16`
+works out to `60 / (bpm × 4)`, exactly the value the step duration was hard-wired to
+before this control existed.
+
+The division applies to **one step**, not the cycle, so changing `Steps` lengthens or
+shortens the cycle while the pulse stays put. A 5-step pattern is still five 16ths
+phasing against the bar.
+
+`T` and `D` drive a single tri-state `stepMod` rather than a flag each. Triplet is ×⅔
+and dotted is ×1.5, so both together would be ×1 — a state that looks meaningful and
+sounds like neither. One value makes it unrepresentable rather than merely discouraged.
+
+Each track carries its own accumulator in the Scheduler, so a slow track simply emits
+fewer steps per lookahead window than a fast one.
 
 ## Parameter flow
 
@@ -210,7 +239,7 @@ npm run serve    # Python HTTP server on port 8080
 ## Test
 
 ```bash
-npm test         # Node native test runner, 102 tests, no dependencies
+npm test         # Node native test runner, 127 tests, no dependencies
 ```
 
 ## Types

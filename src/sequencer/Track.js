@@ -6,6 +6,7 @@ import {
   MOD_DISTRIBUTION,
 } from './generators/distributions.js';
 import { clampParam, defaultsFor } from '../core/paramSchema.js';
+import { stepModFactor } from './stepDivision.js';
 
 /**
  * One sequencer channel: its parameters plus the four generators that read them.
@@ -98,6 +99,20 @@ export class Track {
 
   getPattern() {
     return this.trigger.getPattern();
+  }
+
+  /**
+   * Seconds per step, given the length of one bar.
+   *
+   * The track owns this rather than the scheduler because the division is a track
+   * parameter: the scheduler knows the tempo, each track decides how it subdivides it.
+   * That is what lets two tracks run at different speeds off one clock.
+   *
+   * Note this is the duration of *one step*, not of the cycle -- so changing `steps`
+   * lengthens or shortens the cycle while leaving the step division alone.
+   */
+  stepDuration(barSeconds) {
+    return (barSeconds / this.params.stepDivision) * stepModFactor(this.params.stepMod);
   }
 
   /**

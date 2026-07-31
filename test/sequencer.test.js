@@ -72,7 +72,7 @@ test('EventBus delivers, unsubscribes, and survives a throwing listener', () => 
 test('one step is a 16th note at the set tempo', () => {
   for (const bpm of [30, 120, 300]) {
     const h = harness({ bpm });
-    assert.equal(h.scheduler.stepDuration, 60 / (bpm * 4));
+    assert.equal(h.scheduler.stepDurationFor(0), 60 / (bpm * 4));
   }
 });
 
@@ -82,7 +82,7 @@ test('steps are evenly spaced and free of drift', () => {
   h.advance(20);
 
   assert.ok(h.steps.length > 100, `only ${h.steps.length} steps`);
-  const expected = h.scheduler.stepDuration;
+  const expected = h.scheduler.stepDurationFor(0);
   const first = h.steps[0].audioTime;
 
   for (let i = 1; i < h.steps.length; i += 1) {
@@ -120,7 +120,7 @@ test('a late tick emits the missed steps rather than sliding the grid', () => {
   const gained = h.steps.length - before;
   // 1 s at 120 BPM is 8 sixteenth notes; all of them must appear.
   assert.ok(gained >= 8, `only recovered ${gained} steps`);
-  const expected = h.scheduler.stepDuration;
+  const expected = h.scheduler.stepDurationFor(0);
   for (let i = 1; i < h.steps.length; i += 1) {
     const gap = h.steps[i].audioTime - h.steps[i - 1].audioTime;
     assert.ok(Math.abs(gap - expected) < 1e-9, `grid slipped at step ${i}`);

@@ -77,7 +77,7 @@ test('transport params are shared, since there is one clock', () => {
   const { scheduler, store } = harness();
   store.set('bpm', 90, 1);
   assert.equal(scheduler.params.bpm, 90);
-  assert.equal(scheduler.stepDuration, 60 / (90 * 4));
+  assert.equal(scheduler.stepDurationFor(0), 60 / (90 * 4));
 });
 
 test('every step is tagged with the track that produced it', () => {

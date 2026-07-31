@@ -22,6 +22,8 @@
             "steps": 16,
             "pulses": 5,
             "rotation": 0,
+            "stepDivision": 16,
+            "stepMod": 0,
             "logicOp": 1,
             "probability": 0,
             "trigLoop": false,
