@@ -17,6 +17,7 @@ import { StepDivisionControl } from './ui/StepDivisionControl.js';
 import { LogicOpControl } from './ui/LogicOpControl.js';
 import { FillIconControl } from './ui/FillIconControl.js';
 import { TrigLoopControl } from './ui/TrigLoopControl.js';
+import { InfoBar } from './ui/InfoBar.js';
 import { diceIcon } from './ui/icons.js';
 import { SCALES } from './sequencer/scales.js';
 
@@ -311,6 +312,38 @@ bus.on('step', (step) => {
   );
   ui.pushStep(step);
 });
+
+// ---------------------------------------------------------------------------
+// Info footer
+// ---------------------------------------------------------------------------
+
+// One delegated pair of listeners for every control on the page. Each control
+// names its own description through `data-info` -- most of them from their spec
+// key, inside their own constructor -- so nothing here needs a list of controls to
+// keep in sync, and a new control is one attribute away from being described.
+const infoBar = new InfoBar(document.getElementById('infobar'));
+// closest(), not e.target.dataset: nearly every control's pointer events land on a
+// child that carries nothing -- a .dragnum__value, a .bsslider__rail, an icon svg.
+const infoHostFor = (e) => (e.target instanceof Element ? e.target.closest('[data-info]') : null);
+
+// pointerover bubbles (pointerenter does not), so this one handler covers arriving
+// and leaving both: stepping off a control onto the page fires it on the page,
+// which resolves to no host. Drag and wheel need no special case -- a captured
+// pointer keeps delivering to the control it started on, so the text holds instead
+// of flickering, and a wheel implies the pointer is already over the control.
+document.addEventListener('pointerover', (e) => {
+  const host = infoHostFor(e);
+  if (host) infoBar.show(host.dataset.info);
+  else infoBar.showHint();
+});
+document.addEventListener('focusin', (e) => {
+  const host = infoHostFor(e);
+  if (host) infoBar.show(host.dataset.info);
+});
+// The pointer leaving the window entirely fires no pointerover anywhere.
+document.addEventListener('pointerleave', () => infoBar.showHint());
+// A narrower bar can turn text that fitted into text that has to scroll.
+window.addEventListener('resize', () => infoBar.remeasure());
 
 // ---------------------------------------------------------------------------
 // Transport

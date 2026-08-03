@@ -54,6 +54,8 @@ export class FillIconControl {
     this.element.setAttribute('role', 'slider');
     this.element.setAttribute('aria-orientation', 'vertical');
     this.element.setAttribute('aria-label', spec.label);
+    // Names this control's description for the info footer -- see ui/infoText.js.
+    this.element.dataset.info = spec.key;
 
     const glyph = document.createElement('span');
     glyph.className = 'fillicon__glyph';

@@ -1,0 +1,112 @@
+<!doctype html>
+<!-- Manual check for InfoBar: resolving one or several ids to text, the generic
+     range.min/max fallback for generated dotted ids, falling back to the hint rather
+     than blanking, and the marquee -- which must engage only when the text actually
+     overruns the lane, and must not restart when the same text is shown again. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+/* Overrides the fixed positioning so the bar sits in the flow here, and pins a
+   narrow lane so a known-length string is guaranteed to overrun it. */
+#infobar{position:static;width:260px;}</style>
+</head>
+<body>
+<footer class="infobar" id="infobar"></footer>
+<pre id="log"></pre>
+<script type="module">
+import { InfoBar } from '../../src/ui/InfoBar.js';
+import { INFO_HINT, INFO_TEXT } from '../../src/ui/infoText.js';
+
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const bar = new InfoBar(document.getElementById('infobar'));
+const textEl = bar.textEl;
+const shown = () => textEl.textContent;
+const marqueeing = () => textEl.classList.contains('is-marquee');
+const shift = () => textEl.style.getPropertyValue('--marquee-shift');
+const duration = () => textEl.style.getPropertyValue('--marquee-duration');
+
+log('-- structure and idle state --');
+check('builds its own lane', Boolean(document.querySelector('#infobar .infobar__lane')), true);
+check('builds its own text span', Boolean(document.querySelector('#infobar .infobar__text')), true);
+check('starts on the hint, never empty', shown(), INFO_HINT);
+
+log('\n-- resolving ids --');
+bar.show('bpm');
+check('a param key resolves to its text', shown(), INFO_TEXT.bpm);
+bar.show('play');
+check('a non-param id resolves too', shown(), INFO_TEXT.play);
+
+log('\n-- several ids at once (the bias/spread track) --');
+bar.show('velBias velSpread');
+check('both descriptions, joined', shown(), `${INFO_TEXT.velBias} · ${INFO_TEXT.velSpread}`);
+
+log('\n-- the generated dotted-id fallback --');
+bar.show('noteBias.min');
+check('an unknown dotted id falls back to range.min', shown(), INFO_TEXT['range.min']);
+bar.show('velSpread.max');
+check('...and to range.max, whatever the stem', shown(), INFO_TEXT['range.max']);
+
+log('\n-- unresolvable input degrades to the hint --');
+bar.show('thisIdDoesNotExist');
+check('an unknown id shows the hint, not a blank bar', shown(), INFO_HINT);
+bar.show('');
+check('an empty value shows the hint too', shown(), INFO_HINT);
+bar.show('nope alsoNope');
+check('several unknown ids still show the hint', shown(), INFO_HINT);
+bar.show('bpm alsoNope');
+check('a partial match keeps just what resolved', shown(), INFO_TEXT.bpm);
+
+log('\n-- the marquee engages only on overrun --');
+// The lane is 260px wide minus the bar's 18px of padding either side; "BPM — tempo,
+// in beats per minute." fits, the pluck-position sentence does not.
+bar.show('bpm');
+check('short text does not scroll', marqueeing(), 'false');
+check('...and carries no shift', shift(), '');
+bar.show('modBias');
+check('long text scrolls', marqueeing(), 'true');
+check('shift is negative (it travels left)', Number.parseFloat(shift()) < 0, true);
+check('shift is a plain px value a test can read', /^-\d+px$/.test(shift()), true);
+check('duration is a plain s value', /^\d+\.\d\ds$/.test(duration()), true);
+check('duration respects the 2s floor', Number.parseFloat(duration()) >= 2, true);
+
+log('\n-- showing the same text again must not restart the scroll --');
+// Probed by sabotage rather than by reading animation timing, which is not settled
+// synchronously: strip the class by hand, then ask for the same text again. The
+// guard means nothing is re-applied, so the class stays off. Without the guard
+// (or with it comparing the id rather than the resolved text) it would come back --
+// and every pointerover across a control's children would restart the scroll.
+const shiftBefore = shift();
+textEl.classList.remove('is-marquee');
+bar.show('modBias');
+check('unchanged text is not re-applied', marqueeing(), 'false');
+check('...and its shift is left exactly as it was', shift(), shiftBefore);
+// A different value that resolves to the *same* text must also be a no-op, since
+// the guard compares text and not ids -- 'modBias nope' resolves to just modBias.
+bar.show('modBias nope');
+check('a different value resolving to the same text is also a no-op', marqueeing(), 'false');
+// Put it back the way the rest of the checks expect to find it.
+bar.showHint();
+bar.show('modBias');
+check('and it re-engages once the text has genuinely changed', marqueeing(), 'true');
+
+log('\n-- switching away clears the marquee state --');
+bar.show('bpm');
+check('back to short text, no scroll', marqueeing(), 'false');
+check('...and the shift is removed, not left stale', shift(), '');
+
+log('\n-- the hint is reachable again --');
+bar.showHint();
+check('showHint returns to the hint', shown(), INFO_HINT);
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'info-bar-check-done' : 'info-bar-check-failed';
+</script>
+</body>
+</html>

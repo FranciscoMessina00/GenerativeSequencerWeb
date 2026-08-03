@@ -54,6 +54,10 @@ export class DragNumber {
     // is not rendered as one.
     this.element.setAttribute('role', 'slider');
     this.element.setAttribute('aria-label', spec.label);
+    // Names this control's description for the info footer -- see ui/infoText.js.
+    // Set here rather than by every caller, which covers all nine instances at
+    // once, including the ones nested inside other widgets.
+    this.element.dataset.info = spec.key;
 
     this.labelEl = document.createElement('span');
     this.labelEl.className = 'dragnum__label';

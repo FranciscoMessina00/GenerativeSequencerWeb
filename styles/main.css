@@ -78,7 +78,11 @@ main {
   display: grid;
   grid-template-columns: 380px 1fr;
   gap: 16px;
-  padding: 16px 18px 32px;
+  /* The 32px of bottom breathing room plus the 29px the fixed .infobar occupies, so
+     the last control clears it when the page is scrolled to the end. On main rather
+     than body: the test/browser pages load this stylesheet and set their own body
+     padding, and none of them has a <main> or the footer. */
+  padding: 16px 18px 61px;
   align-items: start;
 }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
@@ -979,3 +983,66 @@ input[type="range"]::-moz-range-thumb {
 .trig-loop .dragnum { padding: 4px 6px; gap: 3px; }
 .trig-loop .dragnum__value { font-size: 17px; line-height: 24px; }
 .trig-loop .dragnum__label { line-height: 13px; }
+
+/* ---- info bar: pinned footer, marquees when the description overruns ---- */
+
+/* The mirror of the header's sticky treatment -- panel fill, a --line rule on the
+   edge facing the content, same z-index -- so the page reads as chrome above,
+   chrome below, instrument between. 29px tall: 13px of line box plus 8px either
+   side, a figure main's bottom padding is written against. */
+.infobar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  padding: 8px 18px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  /* Matching .status / .patch__status / #readout: the house voice for live
+     machine-written text. */
+  color: var(--muted);
+  font: 11px/13px ui-monospace, monospace;
+}
+
+/* The clipping window. Its width is what InfoBar measures the text against. */
+.infobar__lane {
+  overflow: hidden;
+}
+
+/* inline-block so the span takes its content's full width and can overrun the lane
+   -- a plain inline span would be broken into lines by the lane instead. */
+.infobar__text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* The one real animation in this stylesheet. Everything else here is a 0.12s
+   transition acknowledging a gesture; this is transport, moving a sentence that
+   does not fit past a window that cannot grow -- and a clipped explanation is
+   worse than a slow one. Only added by InfoBar when the text actually overruns.
+
+   `alternate` supplies the scroll back for free, and the flat stretches at 0-12%
+   and 88-100% hold each end still long enough to read before it reverses.
+   --marquee-shift and --marquee-duration are measured in JS; the fallbacks keep
+   the text parked and motionless if it is ever styled before being measured. */
+@keyframes infobar-marquee {
+  0%, 12% { transform: translateX(0); }
+  88%, 100% { transform: translateX(var(--marquee-shift, 0)); }
+}
+.infobar__text.is-marquee {
+  animation: infobar-marquee var(--marquee-duration, 8s) ease-in-out 0.6s infinite alternate;
+}
+
+/* Nothing else in this file animates long enough to need this. A sentence that
+   slides back and forth on its own does. With the motion gone the text would just
+   be cut off, so the lane becomes scrollable by hand instead -- the information
+   stays reachable either way. */
+@media (prefers-reduced-motion: reduce) {
+  .infobar__text.is-marquee {
+    animation: none;
+  }
+  .infobar__lane {
+    overflow-x: auto;
+  }
+}

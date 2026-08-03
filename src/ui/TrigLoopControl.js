@@ -47,6 +47,8 @@ export class TrigLoopControl {
     this.toggleButton.type = 'button';
     this.toggleButton.className = 'trig-loop__toggle';
     this.toggleButton.setAttribute('aria-label', enabledSpec.label);
+    // The length and permutation controls tag themselves; only the toggle needs it.
+    this.toggleButton.dataset.info = enabledSpec.key;
     const toggleCaption = document.createElement('span');
     toggleCaption.className = 'trig-loop__label';
     toggleCaption.textContent = 'Loop';

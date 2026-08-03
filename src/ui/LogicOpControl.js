@@ -32,6 +32,8 @@ export class LogicOpControl {
     this.element = document.createElement('button');
     this.element.type = 'button';
     this.element.className = 'logic-op';
+    // Names this control's description for the info footer -- see ui/infoText.js.
+    this.element.dataset.info = spec.key;
     this.element.addEventListener('click', () => this.#cycle());
 
     this.iconEl = document.createElement('span');

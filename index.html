@@ -16,22 +16,26 @@
          See src/core/presets.js. -->
     <div class="patch">
       <label class="patch__label" for="preset-slots">Patch</label>
-      <select id="preset-slots" aria-label="Factory patches"></select>
-      <button id="preset-load">Load</button>
+      <select id="preset-slots" aria-label="Factory patches" data-info="presetSlots"></select>
+      <button id="preset-load" data-info="presetLoad">Load</button>
       <span class="patch__status" id="preset-status" aria-live="polite"></span>
     </div>
 
+    <!-- data-info names this control's entry in src/ui/infoText.js, which the footer
+         bar shows on hover. Written by hand here because none of the header chrome
+         has a param schema entry to take a key from; every control that does gets
+         the attribute from its own spec, in its widget's constructor. -->
     <div class="transport">
-      <button id="play" class="primary">Play</button>
-      <button id="pluck">Pluck once</button>
-      <button id="reseed">Reseed</button>
+      <button id="play" class="primary" data-info="play">Play</button>
+      <button id="pluck" data-info="pluck">Pluck once</button>
+      <button id="reseed" data-info="reseed">Reseed</button>
     </div>
   </header>
 
   <main>
     <aside class="rhythm-col">
       <div class="ring-wrap">
-        <canvas id="ring" aria-label="Euclidean step ring"></canvas>
+        <canvas id="ring" aria-label="Euclidean step ring" data-info="ring"></canvas>
         <!-- Sized in JS to the inscribed square of the ring's hub. -->
         <div class="hub" id="hub"></div>
       </div>
@@ -52,6 +56,11 @@
     </aside>
     <div class="panel" id="controls"></div>
   </main>
+
+  <!-- Filled by src/ui/InfoBar.js, which builds the clipping lane and text span
+       inside. aria-live="off" on purpose, as on #readout: this text changes on
+       every hover, and each control already carries its own aria-label. -->
+  <footer class="infobar" id="infobar" aria-live="off"></footer>
 
   <script type="module" src="./src/main.js"></script>
 </body>

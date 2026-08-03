@@ -16,6 +16,8 @@ export class Dropdown {
 
     const root = document.createElement('div');
     root.className = 'dropdown';
+    // On the root, so the label counts as part of the control -- see ui/infoText.js.
+    root.dataset.info = spec.key;
 
     const label = document.createElement('label');
     label.className = 'dropdown__label';

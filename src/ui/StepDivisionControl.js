@@ -67,6 +67,9 @@ export class StepDivisionControl {
     button.className = 'step-division__mod';
     button.textContent = letter;
     button.setAttribute('aria-label', name);
+    // Both letters share one description: they are two faces of a single tri-state
+    // parameter, not two parameters -- see ui/infoText.js.
+    button.dataset.info = this.modSpec.key;
     button.addEventListener('click', () => this.#toggleMod(id));
     return button;
   }

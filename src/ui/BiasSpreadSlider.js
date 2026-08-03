@@ -92,6 +92,10 @@ export class BiasSpreadSlider {
     this.trackEl.tabIndex = 0;
     this.trackEl.setAttribute('role', 'slider');
     this.trackEl.setAttribute('aria-label', `${title} pitch and spread`);
+    // Two ids, because one element really does drive two parameters -- horizontal
+    // drag sets bias, vertical sets spread. The footer shows both descriptions;
+    // see ui/infoText.js.
+    this.trackEl.dataset.info = `${this.biasSpec.key} ${this.spreadSpec.key}`;
 
     const rail = document.createElement('div');
     rail.className = 'bsslider__rail';
@@ -123,6 +127,8 @@ export class BiasSpreadSlider {
     this.axisToggleEl.type = 'button';
     this.axisToggleEl.className = 'bsslider__axis-toggle';
     this.axisToggleEl.setAttribute('aria-label', `${title}: constrain drag to one axis at a time`);
+    // A hand-written id: this toggle is a view preference with no schema entry.
+    this.axisToggleEl.dataset.info = 'axisLock';
     this.axisToggleEl.addEventListener('click', () => {
       this.axisLocked = !this.axisLocked;
       this.#renderAxisLock();

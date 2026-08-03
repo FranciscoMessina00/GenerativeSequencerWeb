@@ -112,6 +112,9 @@ export class UIController {
   #buildControl(spec) {
     const wrapper = document.createElement('div');
     wrapper.className = spec.type === 'toggle' ? 'control toggle' : 'control';
+    // On the row rather than the input, so hovering the label or the value readout
+    // describes the control too -- see ui/infoText.js.
+    wrapper.dataset.info = spec.key;
 
     const label = document.createElement('label');
     label.textContent = spec.label;

@@ -45,6 +45,8 @@ export class GlideControl {
     this.modeButton.type = 'button';
     this.modeButton.className = 'glide-control__mode';
     this.modeButton.setAttribute('aria-label', modeSpec.label);
+    // The amount's drag-number tags itself; only the mode button needs it here.
+    this.modeButton.dataset.info = modeSpec.key;
     this.modeButton.setAttribute('aria-pressed', String(this.exponential));
     this.modeButton.addEventListener('click', () => this.#toggleMode());
     this.#renderIcon();
