@@ -72,11 +72,6 @@ export class Track {
         this.velocity.setLoopEnabled(this.params.velLoop, this.params.velLoopLength);
         break;
 
-      case 'modLoop':
-      case 'modLoopLength':
-        this.mod.setLoopEnabled(this.params.modLoop, this.params.modLoopLength);
-        break;
-
       default:
         break;
     }
@@ -94,7 +89,6 @@ export class Track {
     this.trigger.setLoopEnabled(p.trigLoop, p.trigLoopLength, p.trigPerm);
     this.note.setLoopEnabled(p.noteLoop, p.noteLoopLength, p.notePerm);
     this.velocity.setLoopEnabled(p.velLoop, p.velLoopLength);
-    this.mod.setLoopEnabled(p.modLoop, p.modLoopLength);
   }
 
   getPattern() {
@@ -116,13 +110,10 @@ export class Track {
   }
 
   /**
-   * Shared ramp-time formula for glide and pluck interpolation. The ramp lasts one
-   * step minus 30 ms scaled by magnitude, and the mode picks the curve: exponential
-   * in frequency (linear in pitch-space) or plain linear. Zero magnitude skips the
-   * ramp, which also makes the mode moot -- there is nothing to shape.
-   *
-   * The callers derive `(magnitude, exponential)` differently: glide from two
-   * params, pluck interpolation from one signed knob whose sign is the mode.
+   * Ramp-time formula for glide. The ramp lasts one step minus 30 ms scaled by
+   * magnitude, and the mode picks the curve: exponential in frequency (linear in
+   * pitch-space) or plain linear. Zero magnitude skips the ramp, which also makes
+   * the mode moot -- there is nothing to shape.
    */
   #ramp(magnitude, exponential, stepDuration) {
     if (magnitude === 0) return { time: 0, exponential: false };
@@ -166,7 +157,9 @@ export class Track {
     });
 
     const glide = this.#ramp(p.glideAmount, p.glideMode, stepDuration);
-    const modRamp = this.#ramp(Math.abs(p.modInterp), p.modInterp > 0, stepDuration);
+    // Pluck-position interpolation was removed; this stays fixed at what its
+    // default (modInterp: 0) already produced -- an instant, un-ramped change.
+    const modRamp = { time: 0, exponential: false };
 
     return {
       trackId: this.trackId,

@@ -186,11 +186,9 @@ test('untriggered steps are still emitted, so generators keep advancing', () => 
 test('every step carries what the audio engine needs', () => {
   const h = harness();
   // Glide is now an unsigned amount plus a separate mode flag (was one signed
-  // value where the sign doubled as the mode) -- modInterp is untouched by
-  // that change and keeps the old sign convention.
+  // value where the sign doubled as the mode).
   h.bus.emit('param:change', { trackId: 0, key: 'glideAmount', value: 0.5 });
   h.bus.emit('param:change', { trackId: 0, key: 'glideMode', value: true });
-  h.bus.emit('param:change', { trackId: 0, key: 'modInterp', value: -0.5 });
   h.scheduler.start();
   h.advance(1);
 
@@ -206,7 +204,9 @@ test('every step carries what the audio engine needs', () => {
     assert.ok(s.velocity >= 0.1 && s.velocity <= 1);
     assert.ok(s.mod >= 2 && s.mod <= 20);
     assert.equal(s.glideExponential, true); // glideMode: true -> exponential
-    assert.equal(s.modExponential, false); // negative interp -> linear
+    // Pluck-position interpolation was removed; the ramp is now fixed at zero.
+    assert.equal(s.modTime, 0);
+    assert.equal(s.modExponential, false);
     assert.ok(s.glideTime > 0 && s.glideTime < s.stepDuration);
   }
 });
@@ -235,26 +235,6 @@ test('glide ramps for one step minus 30ms, scaled by amount', () => {
   const exponential = track.step(stepDuration);
   assert.equal(exponential.glideTime, (stepDuration - 0.03) * 1);
   assert.equal(exponential.glideExponential, true);
-});
-
-test('pluck-position interpolation takes its curve from the knob sign', () => {
-  const track = new Track(0, new Rng(1));
-  const stepDuration = 0.125;
-
-  track.setParam('modInterp', 0);
-  assert.equal(track.step(stepDuration).modTime, 0);
-
-  // Magnitude sets the ramp length, sign selects linear (negative) or
-  // exponential (positive).
-  track.setParam('modInterp', -0.5);
-  const linear = track.step(stepDuration);
-  assert.equal(linear.modTime, (stepDuration - 0.03) * 0.5);
-  assert.equal(linear.modExponential, false);
-
-  track.setParam('modInterp', 0.5);
-  const exponential = track.step(stepDuration);
-  assert.equal(exponential.modTime, (stepDuration - 0.03) * 0.5);
-  assert.equal(exponential.modExponential, true);
 });
 
 test('the trigger loop produces a 70-step super-pattern', () => {

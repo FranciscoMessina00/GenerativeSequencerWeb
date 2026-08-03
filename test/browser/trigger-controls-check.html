@@ -1,6 +1,7 @@
 <!doctype html>
 <!-- Manual check for the rhythm row's three icon controls: the cycling logic gate, the
-     drag-to-fill dice, and the loop cluster whose toggle dims the permutation. -->
+     drag-to-fill dice, and the loop cluster whose toggle dims the permutation -- plus
+     the permutation-less variant of the loop cluster that Velocity uses. -->
 <html>
 <head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
 <style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
@@ -254,6 +255,21 @@ check('a finer step is spoken to a tenth', permEl.getAttribute('aria-valuetext')
 check('while probability speaks whole percents', prob.element.getAttribute('aria-valuetext'), '35%');
 
 check('the cluster owns three keys', loop.keys().join(','), 'trigLoop,trigLoopLength,trigPerm');
+
+// ---------------------------------------------------------------------------
+// Loop cluster without a permutation param -- Velocity's case
+// ---------------------------------------------------------------------------
+log('\n-- loop cluster, no permutation --');
+const noPermLoop = new TrigLoopControl({
+  bus, trackId: 0,
+  enabledSpec: { key: 'velLoop', label: 'Velocity Loop', type: 'toggle', def: false },
+  lengthSpec: { key: 'velLoopLength', label: 'Velocity Loop Length', short: 'Len', min: 1, max: 32, step: 1, def: 1 },
+});
+check('a loop built without permSpec owns two keys', noPermLoop.keys().join(','), 'velLoop,velLoopLength');
+check('...and builds no permutation control', noPermLoop.permControl, 'null');
+check('...and its element holds no fill-icon glyph', noPermLoop.element.querySelector('.fillicon'), 'null');
+noPermLoop.toggleButton.click();
+check('the toggle still works with no permutation to dim', noPermLoop.toggleButton.classList.contains('is-active'), 'true');
 
 // ---------------------------------------------------------------------------
 // Layout: nothing spills out of the row

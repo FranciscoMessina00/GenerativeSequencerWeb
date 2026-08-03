@@ -4,9 +4,9 @@ import { crossArrowsIcon, loopIcon } from './icons.js';
 import { formatNumber } from './numberUtils.js';
 
 /**
- * The rhythm loop: capture it, set how long it is, reorder it.
+ * A generator's loop: capture it, set how long it is, optionally reorder it.
  *
- * One control for three parameters because they are one mechanism. Rendered as three
+ * One control for two or three parameters because they are one mechanism. Rendered as
  * separate slider rows they read as unrelated knobs, when in truth the length only means
  * something once the loop is on and the permutation only means something once there is a
  * loop to permute.
@@ -15,8 +15,12 @@ import { formatNumber } from './numberUtils.js';
  *   number       N, the loop's length in steps
  *   crossed      reorders that loop, scaled by its factorial -- see permutationIndex()
  *
- * Owning all three is also what keeps the permutation's dimming internal: it follows the
- * toggle's state directly instead of needing a special case in the wiring.
+ * Owning all of them is also what keeps the permutation's dimming internal: it follows
+ * the toggle's state directly instead of needing a special case in the wiring.
+ *
+ * The permutation glyph is optional: not every generator has one (Velocity's loop
+ * doesn't), so a control built without `permSpec` simply omits it rather than every
+ * caller needing its own two-vs-three-part variant of this class.
  */
 export class TrigLoopControl {
   /**
@@ -25,7 +29,8 @@ export class TrigLoopControl {
    * @param {number} [opts.trackId]
    * @param {object} opts.enabledSpec paramSchema entry for the loop toggle
    * @param {object} opts.lengthSpec  paramSchema entry for the loop length
-   * @param {object} opts.permSpec    paramSchema entry for the permutation
+   * @param {object} [opts.permSpec]  paramSchema entry for the permutation, if this
+   *   generator has one
    */
   constructor({ bus, trackId = 0, enabledSpec, lengthSpec, permSpec }) {
     this.bus = bus;
@@ -54,24 +59,29 @@ export class TrigLoopControl {
       onInput: (v) => this.#emit(lengthSpec.key, v),
     });
 
-    this.permControl = new FillIconControl({
-      spec: permSpec,
-      buildIcon: crossArrowsIcon,
-      label: 'Perm',
-      onInput: (v) => this.#emit(permSpec.key, v),
-    });
+    this.permControl = permSpec
+      ? new FillIconControl({
+          spec: permSpec,
+          buildIcon: crossArrowsIcon,
+          label: 'Perm',
+          onInput: (v) => this.#emit(permSpec.key, v),
+        })
+      : null;
 
     const root = document.createElement('div');
     root.className = 'trig-loop';
-    root.append(this.toggleButton, this.lengthControl.element, this.permControl.element);
+    root.append(this.toggleButton, this.lengthControl.element);
+    if (this.permControl) root.append(this.permControl.element);
     this.element = root;
 
     this.#renderLoopState();
   }
 
-  /** The three schema keys this control owns. */
+  /** The two or three schema keys this control owns. */
   keys() {
-    return [this.enabledSpec.key, this.lengthSpec.key, this.permSpec.key];
+    return this.permSpec
+      ? [this.enabledSpec.key, this.lengthSpec.key, this.permSpec.key]
+      : [this.enabledSpec.key, this.lengthSpec.key];
   }
 
   /**
@@ -84,7 +94,7 @@ export class TrigLoopControl {
       this.#renderLoopState();
     } else if (key === this.lengthSpec.key) {
       this.lengthControl.setValue(value);
-    } else if (key === this.permSpec.key) {
+    } else if (this.permSpec && key === this.permSpec.key) {
       this.permControl.setValue(value);
     }
   }
@@ -101,7 +111,7 @@ export class TrigLoopControl {
   #renderLoopState() {
     this.toggleButton.classList.toggle('is-active', this.enabled);
     this.toggleButton.setAttribute('aria-pressed', String(this.enabled));
-    this.permControl.setInactive(!this.enabled);
+    this.permControl?.setInactive(!this.enabled);
   }
 
   #toggle() {

@@ -52,8 +52,8 @@ export const PARAM_SCHEMA = [
   // false = linear, true = exponential.
   { key: 'glideMode', label: 'Glide Mode', group: 'Pitch', target: 'track', type: 'toggle', def: false },
   { key: 'noteLoop', label: 'Notes Loop', group: 'Pitch', target: 'track', type: 'toggle', def: false },
-  { key: 'noteLoopLength', label: 'Notes Loop Length', group: 'Pitch', target: 'track', min: 1, max: 32, step: 1, def: 1 },
-  { key: 'notePerm', label: 'Notes Permutation', group: 'Pitch', target: 'track', min: 0, max: 1, step: 0.001, def: 0 },
+  { key: 'noteLoopLength', label: 'Notes Loop Length', group: 'Pitch', short: 'Len', target: 'track', min: 1, max: 32, step: 1, def: 1 },
+  { key: 'notePerm', label: 'Notes Permutation', group: 'Pitch', target: 'track', min: 0, max: 1, step: 0.001, def: 0, display: 'percent' },
 
   // ---- Velocity -----------------------------------------------------------
   // Stored as 0.1..1, which is what VELOCITY_DISTRIBUTION's formulas are
@@ -62,18 +62,15 @@ export const PARAM_SCHEMA = [
   { key: 'velBias', label: 'Velocity Bias', group: 'Velocity', target: 'track', min: 0.1, max: 1, step: 0.01, def: 0.55, display: 'percent' },
   { key: 'velSpread', label: 'Velocity Spread', group: 'Velocity', target: 'track', min: 0.1, max: 1, step: 0.01, def: 0.2, display: 'percent' },
   { key: 'velLoop', label: 'Velocity Loop', group: 'Velocity', target: 'track', type: 'toggle', def: false },
-  { key: 'velLoopLength', label: 'Velocity Loop Length', group: 'Velocity', target: 'track', min: 1, max: 32, step: 1, def: 1 },
-
-  // ---- Modulation (plucking position) -------------------------------------
-  { key: 'modBias', label: 'Pluck Position Bias', group: 'Modulation', target: 'track', min: 2, max: 20, step: 0.1, def: 4 },
-  { key: 'modSpread', label: 'Pluck Position Spread', group: 'Modulation', target: 'track', min: 0.1, max: 20, step: 0.1, def: 2 },
-  // One signed knob: magnitude is the ramp length, sign picks the curve
-  // (negative linear, positive exponential).
-  { key: 'modInterp', label: 'Pluck Interp (lin | exp)', group: 'Modulation', target: 'track', min: -1, max: 1, step: 0.01, def: 0 },
-  { key: 'modLoop', label: 'Modulation Loop', group: 'Modulation', target: 'track', type: 'toggle', def: false },
-  { key: 'modLoopLength', label: 'Modulation Loop Length', group: 'Modulation', target: 'track', min: 1, max: 32, step: 1, def: 1 },
+  { key: 'velLoopLength', label: 'Velocity Loop Length', group: 'Velocity', short: 'Len', target: 'track', min: 1, max: 32, step: 1, def: 1 },
 
   // ---- Modal string voice -------------------------------------------------
+  // Pluck position lives here, not under Modulation -- it is a property of *where*
+  // the string is plucked, the same as decay or damping are properties of how it
+  // rings. Still target: 'track' (it drives the per-step generator in Track.js),
+  // unlike the voice-level params below it.
+  { key: 'modBias', label: 'Pluck Position Bias', group: 'String', target: 'track', min: 2, max: 20, step: 0.1, def: 4 },
+  { key: 'modSpread', label: 'Pluck Position Spread', group: 'String', target: 'track', min: 0.1, max: 20, step: 0.1, def: 2 },
   // Mode count is the CPU/quality trade-off: more modes, brighter and costlier.
   { key: 'modes', label: 'Modes', group: 'String', target: 'voice', min: 4, max: 32, step: 1, def: 16 },
   // beta = stiffness / 1000, so 11 gives beta = 0.011 -- a realistic steel string.

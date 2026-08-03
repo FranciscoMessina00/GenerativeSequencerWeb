@@ -796,15 +796,24 @@ input[type="range"]::-moz-range-thumb {
   height: 100%;
 }
 
-.fillicon__base { color: var(--muted); }
+/* Dimmed well below the resting --muted text colour: --muted and --accent are close
+   enough in brightness that the fill line barely read against it (both are light
+   tones on a dark background, differing mainly in hue) -- the empty portion needs to
+   sit much darker so the boundary is a brightness jump, not just a colour change. */
+.fillicon__base { color: var(--muted); opacity: 0.45; }
 
 /* The level. --fill-top is how much to hide from the top, set from the value in JS as a
    plain percentage -- no calc() here, so the property stays something a test can read
    back and compare. Untransitioned on purpose: during a drag the fill has to track the
-   pointer, and an eased clip would lag behind the hand. */
+   pointer, and an eased clip would lag behind the hand.
+
+   The glow is what makes the filled portion read as "lit" rather than merely
+   differently-coloured -- same recipe as the bias/spread handle's rest-state ring
+   (0 0 12px rgba(accent, 0.6)), scaled down for a 24px glyph. */
 .fillicon__fill {
   color: var(--accent);
   clip-path: inset(var(--fill-top, 100%) 0 0 0);
+  filter: drop-shadow(0 0 3px rgba(111, 184, 224, 0.6));
 }
 
 /* Fixed height regardless of what text is inside -- the caption and the peeked
@@ -896,10 +905,14 @@ input[type="range"]::-moz-range-thumb {
 /* ---- rhythm loop: capture toggle, length, permutation ---- */
 
 /* Captions on one line across the row, so every control is a glyph over a caption and the
-   loop's number occupies the slot a glyph would. */
+   loop's number occupies the slot a glyph would.
+   Centered because Pitch and Velocity place this directly in their section, where it
+   stretches to the full column width -- inside Rhythm's own .trig-row it is already
+   sized to its content, so centering has nothing to do there and changes nothing. */
 .trig-loop {
   display: flex;
   align-items: flex-end;
+  justify-content: center;
   gap: 2px;
 }
 

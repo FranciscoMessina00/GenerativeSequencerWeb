@@ -42,10 +42,7 @@
             "velLoop": false,
             "velLoopLength": 1,
             "modBias": 4,
-            "modSpread": 2,
-            "modInterp": 0,
-            "modLoop": false,
-            "modLoopLength": 1
+            "modSpread": 2
           }
         ]
       }

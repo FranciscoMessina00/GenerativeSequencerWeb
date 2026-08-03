@@ -1,6 +1,6 @@
 import { EventBus } from './core/EventBus.js';
 import { Rng } from './core/rng.js';
-import { PARAM_GROUPS, paramSpec } from './core/paramSchema.js';
+import { paramSpec } from './core/paramSchema.js';
 import { ParamStore } from './core/ParamStore.js';
 // Namespaced because toJSON has no button of its own -- it is how a new factory
 // patch gets authored, via the console handle at the bottom of this file.
@@ -131,7 +131,7 @@ ui.renderGroups(document.getElementById('rhythm-controls'), ['Rhythm'], {
 const BIAS_SPREAD_AXES = {
   Pitch: { bias: 'noteBias', spread: 'noteSpread', title: 'Note' },
   Velocity: { bias: 'velBias', spread: 'velSpread', title: 'Velocity' },
-  Modulation: { bias: 'modBias', spread: 'modSpread', title: 'Pluck Position' },
+  String: { bias: 'modBias', spread: 'modSpread', title: 'Pluck Position' },
 };
 const sliderPrepend = {};
 /** Kept by group so the sliders can be registered for two-way sync below. */
@@ -148,6 +148,26 @@ for (const [group, axes] of Object.entries(BIAS_SPREAD_AXES)) {
   sliderPrepend[group] = slider.element;
 }
 const sliderSkipKeys = Object.values(BIAS_SPREAD_AXES).flatMap((a) => [a.bias, a.spread]);
+
+// Pitch and Velocity get the same loop mechanism Rhythm draws as a glyph row --
+// capture, length, and (where the schema has one) reorder. See TrigLoopControl.js.
+const noteLoopControl = new TrigLoopControl({
+  bus,
+  trackId: VISIBLE_TRACK,
+  enabledSpec: paramSpec('noteLoop'),
+  lengthSpec: paramSpec('noteLoopLength'),
+  permSpec: paramSpec('notePerm'),
+});
+// Velocity has no permutation param, so its loop is capture + length only --
+// TrigLoopControl omits the permutation glyph whenever permSpec isn't passed.
+const velLoopControl = new TrigLoopControl({
+  bus,
+  trackId: VISIBLE_TRACK,
+  enabledSpec: paramSpec('velLoop'),
+  lengthSpec: paramSpec('velLoopLength'),
+});
+const NOTE_LOOP_KEYS = ['noteLoop', 'noteLoopLength', 'notePerm'];
+const VEL_LOOP_KEYS = ['velLoop', 'velLoopLength'];
 
 // Scale and Glide share one row below the Note slider: Scale flexes to fill it,
 // Glide sits fixed-width at the right.
@@ -167,13 +187,30 @@ scaleRow.className = 'control-row dropdown-row';
 scaleRow.append(scaleDropdown.element, glideControl.element);
 
 const pitchPrepend = document.createElement('div');
-pitchPrepend.append(sliderPrepend.Pitch, scaleRow);
+pitchPrepend.append(sliderPrepend.Pitch, scaleRow, noteLoopControl.element);
 sliderPrepend.Pitch = pitchPrepend;
+
+const velocityPrepend = document.createElement('div');
+velocityPrepend.append(sliderPrepend.Velocity, velLoopControl.element);
+sliderPrepend.Velocity = velocityPrepend;
+
+// Modulation used to hold pluck interpolation and its own loop; both are gone, and
+// pluck position itself moved to String (see BIAS_SPREAD_AXES above). The group has
+// no schema entries left, so an empty-but-truthy prepend is what keeps its heading
+// visible -- the same mechanism Rhythm's own prepend-only section relies on below.
+sliderPrepend.Modulation = document.createElement('div');
+
+// Group order and membership no longer track PARAM_GROUPS: Modulation has no schema
+// entries of its own anymore, so it would otherwise vanish from a schema-derived list.
+const CONTROL_GROUPS = ['Pitch', 'Velocity', 'Modulation', 'String', 'Granulator', 'Transport'];
 
 ui.renderGroups(
   document.getElementById('controls'),
-  PARAM_GROUPS.filter((g) => g !== 'Rhythm'),
-  { skip: [...sliderSkipKeys, 'scale', 'glideAmount', 'glideMode'], prepend: sliderPrepend },
+  CONTROL_GROUPS,
+  {
+    skip: [...sliderSkipKeys, ...NOTE_LOOP_KEYS, ...VEL_LOOP_KEYS, 'scale', 'glideAmount', 'glideMode'],
+    prepend: sliderPrepend,
+  },
 );
 // Attaching a hidden readout would still cost a full reformat on every step, so
 // the monitor's own visibility decides whether it gets fed.
@@ -218,6 +255,8 @@ registerKeyed(ui);
 registerKeyed(glideControl);
 registerKeyed(stepDivisionControl);
 registerKeyed(trigLoopControl);
+registerKeyed(noteLoopControl);
+registerKeyed(velLoopControl);
 for (const slider of Object.values(biasSpreadSliders)) registerKeyed(slider);
 registerLeaf(scaleDropdown);
 registerLeaf(logicOpControl);
