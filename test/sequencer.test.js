@@ -346,3 +346,35 @@ test('revisiting a loop length restores the phase that length would have reached
 
   assert.deepEqual(touchedContinuation, baselineContinuation);
 });
+
+test('getTrigLoopWindow circularly tiles a loop shorter than the requested count', () => {
+  // For the ring's buffer overlay: a whole revolution's worth of positions
+  // projected from a loop that doesn't divide the step count evenly must wrap
+  // around and repeat from its own start, rather than running out partway.
+  // Checked structurally (every index equals the one 3 steps later) so the
+  // test holds regardless of what the RNG-seeded history actually contains.
+  const track = new Track(0, new Rng(7));
+  track.setParam('trigLoop', true);
+  track.setParam('trigLoopLength', 3);
+
+  const window = track.getTrigLoopWindow(10);
+  assert.equal(window.length, 10);
+  for (let i = 0; i < 7; i += 1) {
+    assert.equal(window[i], window[i + 3], `index ${i} should repeat 3 steps later`);
+  }
+});
+
+test('getTrigLoopWindow advances by exactly one step per step() call', () => {
+  // A projection taken after one more step() has run should be the previous
+  // one shifted left by one -- what was "2 steps ahead" is now "1 step ahead".
+  // This is what lets the ring project a correct upcoming revolution from
+  // wherever the loop's phase currently sits, not just from a fresh capture.
+  const track = new Track(0, new Rng(7));
+  track.setParam('trigLoop', true);
+  track.setParam('trigLoopLength', 5);
+
+  const before = track.getTrigLoopWindow(5);
+  track.step(0.125);
+  const after = track.getTrigLoopWindow(5);
+  assert.deepEqual(after.slice(0, 4), before.slice(1));
+});

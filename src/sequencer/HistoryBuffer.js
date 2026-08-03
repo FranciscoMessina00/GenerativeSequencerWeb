@@ -86,6 +86,26 @@ export class HistoryBuffer {
   }
 
   /**
+   * The next `count` loop values, current one first (offset 0 is loopCurrent
+   * itself) -- a whole window projected at once from today's frozen capture,
+   * rather than reading one step at a time. Wraps circularly through `loop`
+   * exactly the way loopCurrent already does, just repeated: a loop shorter
+   * than `count` simply repeats from its own start as many times as it takes
+   * to fill the window.
+   *
+   * Kept separate from loopCurrent (rather than the reverse) so the per-step
+   * hot path never allocates an array just to read one value.
+   */
+  loopWindow(count) {
+    const out = new Array(count);
+    for (let k = 0; k < count; k += 1) {
+      const phase = (this.loopStepCount + k) % this.loopLength;
+      out[k] = this.loop[(this.loopReadIndex + phase) % this.loopLength];
+    }
+    return out;
+  }
+
+  /**
    * Glide origin while looping. The natural index here is `loopLength - 3`, which
    * goes negative for loops shorter than 3 -- clamped, so short loops glide to
    * themselves rather than reading off the end.

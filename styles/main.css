@@ -205,11 +205,18 @@ main {
   font-size: 11px;
 }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
+/* Without this, [hidden]'s default display:none loses to the inline-flex rule
+   above (a class+tag selector outranks a bare attribute selector), so the
+   random-pulse entry would stay visible even while hidden is set. */
+.legend span[hidden] { display: none; }
 /* Small wedge-ish bars, matching the ring's sectors rather than dots. */
 .swatch { width: 7px; height: 13px; border-radius: 1px; display: inline-block; }
 .swatch.pulse { background: #4a90b8; }
 .swatch.rest { background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(255, 255, 255, 0.16); }
 .swatch.fired { background: rgba(130, 230, 150, 0.9); height: 5px; }
+/* Full height, unlike .fired: it now shares the main band as an equal half
+   rather than living outside it as a thin accent -- see EuclidView.draw(). */
+.swatch.random { background: rgba(224, 184, 111, 0.9); }
 
 #readout {
   margin: 0;

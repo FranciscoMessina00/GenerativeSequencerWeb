@@ -95,6 +95,11 @@ export class Track {
     return this.trigger.getPattern();
   }
 
+  /** The rhythm loop's next `count` random bits -- for the ring's buffer overlay. */
+  getTrigLoopWindow(count) {
+    return this.trigger.getLoopWindow(count);
+  }
+
   /**
    * Seconds per step, given the length of one bar.
    *

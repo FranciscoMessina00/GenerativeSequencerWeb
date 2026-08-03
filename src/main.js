@@ -49,6 +49,10 @@ const scheduler = new Scheduler({
 /** @type {EuclidView | undefined} */
 let view;
 
+// Named for what it explains rather than what it is, since that's the only
+// reason the ring's own routing closure below needs to touch it.
+const legendRandomEl = document.getElementById('legend-random');
+
 // The one authoritative copy of every parameter. It owns writing to the engines and
 // announces each committed value as `param:changed`, which is what lets a preset or
 // a MIDI message move the controls.
@@ -62,6 +66,21 @@ const store = new ParamStore({
       // pattern parameters move.
       if (key === 'steps' || key === 'pulses' || key === 'rotation') {
         view?.setPattern(tracks[trackId].getPattern());
+      } else if (key === 'trigLoop') {
+        // The ring also overlays the rhythm loop's captured random-bit buffer
+        // while it's active -- see EuclidView.setLoopActive/setLoopSnapshot.
+        // An immediate snapshot on top of activating gives feedback right away,
+        // rather than waiting for the playhead to complete a full revolution.
+        view?.setLoopActive(value);
+        legendRandomEl.hidden = !value;
+        if (value) {
+          view?.setLoopSnapshot(tracks[trackId].getTrigLoopWindow(tracks[trackId].getPattern().length));
+        }
+      } else if ((key === 'trigLoopLength' || key === 'trigPerm') && tracks[trackId].params.trigLoop) {
+        // A recapture changes the buffer's content immediately; refresh the
+        // overlay too rather than leaving it showing what's now a stale
+        // projection until the next revolution happens to complete.
+        view?.setLoopSnapshot(tracks[trackId].getTrigLoopWindow(tracks[trackId].getPattern().length));
       }
     } else if (spec.target === 'transport') {
       scheduler.setParam(key, value);
@@ -233,6 +252,7 @@ view = new EuclidView(
   },
 );
 view.setPattern(tracks[VISIBLE_TRACK].getPattern());
+view.setLoopActive(tracks[VISIBLE_TRACK].params.trigLoop);
 
 // ---------------------------------------------------------------------------
 // Wiring
@@ -275,9 +295,20 @@ bus.on('param:changed', ({ trackId, key, value, global }) => {
   controlSetters.get(key)?.(value);
 });
 
+// The ring's stepIndex from the step *before* this one, so a wrap (a new
+// revolution starting) can be detected here once and the loop's whole next
+// revolution projected in a single shot, rather than the ring updating one
+// position at a time as the playhead happens to pass each one.
+let lastRingStepIndex = -1;
+
 bus.on('step', (step) => {
   audio.noteOn(step);
-  view.enqueue(step);
+  const wrapped = step.trackId === VISIBLE_TRACK && step.stepIndex < lastRingStepIndex;
+  lastRingStepIndex = step.stepIndex;
+  view.enqueue(
+    step,
+    wrapped ? tracks[VISIBLE_TRACK].getTrigLoopWindow(tracks[VISIBLE_TRACK].getPattern().length) : undefined,
+  );
   ui.pushStep(step);
 });
 

@@ -58,6 +58,11 @@ export class TriggerGenerator {
     return this.pattern;
   }
 
+  /** The loop's next `count` random bits, current one first -- see HistoryBuffer.loopWindow. */
+  getLoopWindow(count) {
+    return this.history.loopWindow(count);
+  }
+
   get stepIndex() {
     return this.patternIndex;
   }

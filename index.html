@@ -37,8 +37,11 @@
       </div>
       <div class="legend">
         <span><i class="swatch pulse"></i> Euclid pulse</span>
-        <span><i class="swatch rest"></i> no pulse</span>
-        <span><i class="swatch fired"></i> triggered</span>
+        <span><i class="swatch rest"></i> No pulse</span>
+        <!-- Shown only while the rhythm loop is active -- see main.js's
+             trigLoop handling and EuclidView.setLoopActive. -->
+        <span id="legend-random" hidden><i class="swatch random"></i> Random pulse</span>
+        <span><i class="swatch fired"></i> Triggered</span>
       </div>
       <div id="rhythm-controls"></div>
       <!-- Hidden for now. main.js only feeds it while it is visible, so removing

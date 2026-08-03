@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- Manual check for EuclidView's loop-buffer overlay: a whole-ring snapshot applied
+     at once, only while the loop is active, delivered either immediately
+     (setLoopSnapshot) or attached to a specific enqueued step and applied at that
+     step's own audio-clock-gated promotion (enqueue's loopSnapshot argument) -- and
+     cleared on deactivate, reactivate, a pattern-length change, and stop, mirroring
+     the existing `fired` band's rules. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+#ring{width:220px;height:220px;background:#12151a;}</style>
+</head>
+<body>
+<canvas id="ring"></canvas>
+<pre id="log"></pre>
+<script type="module">
+import { EuclidView } from '../../src/ui/EuclidView.js';
+
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+// A fake, fully controllable audio clock. `advance` enqueues a step, moves the
+// clock past it, and calls frame() directly rather than waiting on a real
+// requestAnimationFrame -- deterministic, and independent of EuclidView's own
+// perpetually-rescheduling RAF chain.
+let now = 0;
+const view = new EuclidView(document.getElementById('ring'), () => now, () => {});
+view.setPattern([1, 0, 1, 0, 1, 0, 1, 0]); // 8 steps
+
+const advance = (stepIndex, triggered, loopSnapshot) => {
+  view.enqueue({ stepIndex, audioTime: now, triggered }, loopSnapshot);
+  now += 1;
+  view.frame();
+};
+
+const dump = (map) => [...map.entries()].map((e) => e.join(':')).join(',');
+
+log('-- an immediate snapshot applies right away --');
+view.setLoopActive(true);
+check('loopActive is true', view.loopActive, true);
+view.setLoopSnapshot([1, 0, 1, 1, 0, 0, 1, 0]);
+check('loopBits holds the whole snapshot at once', dump(view.loopBits), '0:1,1:0,2:1,3:1,4:0,5:0,6:1,7:0');
+
+log('\n-- ordinary steps (no snapshot attached) leave it untouched --');
+advance(0, true);
+advance(1, false);
+check('unrelated steps do not change the overlay', dump(view.loopBits), '0:1,1:0,2:1,3:1,4:0,5:0,6:1,7:0');
+
+log('\n-- a snapshot attached to a step applies only when that step is promoted --');
+advance(2, true, [0, 0, 0, 0, 0, 0, 0, 0]);
+check('the freshly promoted snapshot replaces the old one wholesale', dump(view.loopBits), '0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0');
+
+log('\n-- nothing recorded while inactive --');
+view.setLoopActive(false);
+check('loopBits clears on deactivate', view.loopBits.size, 0);
+advance(3, true, [1, 1, 1, 1, 1, 1, 1, 1]);
+check('a snapshot queued while inactive is not applied', view.loopBits.size, 0);
+
+log('\n-- starting clean on reactivation --');
+view.setLoopActive(true);
+check('no leftover entries from the earlier active period', view.loopBits.size, 0);
+view.setLoopSnapshot([1, 1, 0, 0, 0, 0, 0, 0]);
+check('fresh recording works again', dump(view.loopBits), '0:1,1:1,2:0,3:0,4:0,5:0,6:0,7:0');
+
+log('\n-- a pattern-length change clears it --');
+view.setPattern([1, 0, 1, 0]); // 4 steps, was 8
+check('loopBits clears on a step-count change', view.loopBits.size, 0);
+
+log('\n-- stopping clears it, same as the fired band --');
+view.setLoopSnapshot([1, 0, 1, 0]);
+check('recorded something before stopping', view.loopBits.size, 4);
+view.setRunning(false);
+check('loopBits clears on stop', view.loopBits.size, 0);
+check('fired clears on stop too, for the same reason', view.fired.size, 0);
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'euclid-view-check-done' : 'euclid-view-check-failed';
+</script>
+</body>
+</html>

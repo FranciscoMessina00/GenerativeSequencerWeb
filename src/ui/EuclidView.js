@@ -3,14 +3,22 @@
  * has a pulse. Sectors rather than dots so each step visibly owns a slice of the
  * bar, making the pattern's duty legible.
  *
- * Three layers at once -- pattern, playhead, and whether each step actually
- * *fired*, which is not the same thing since the logic operator and random stream
- * get a say.
+ * Four layers at once -- pattern, playhead, whether each step actually *fired*
+ * (which is not the same thing since the logic operator and random stream get a
+ * say), and, while the rhythm loop is active, a snapshot of which positions
+ * currently carry a registered "1" in that loop's captured random-bit buffer.
+ * That snapshot updates once per revolution, all positions together -- see
+ * setLoopSnapshot() -- rather than trailing the playhead one step at a time.
+ *
+ * The random-bit layer shares the main band with the Euclid pulse (split into
+ * two equal radial halves, since both inputs matter equally to the outcome)
+ * rather than living outside the ring -- only the fired outcome itself stays
+ * out there, as a small band of its own.
  *
  * The playhead follows the audio clock, not the scheduler: the scheduler decides
  * steps ~100 ms early, so drawing on that would run ahead of what you hear.
  */
-/** Distance from the canvas edge to the outer rim, leaving room for fired bands. */
+/** Distance from the canvas edge to the outer rim, leaving room for the fired band. */
 const RIM_MARGIN = 18;
 /** Hub radius as a fraction of the outer radius -- the space the controls get. */
 const HUB_RATIO = 0.8;
@@ -32,6 +40,9 @@ export class EuclidView {
     this.currentStep = -1;
     /** stepIndex -> did it fire last time round. */
     this.fired = new Map();
+    /** stepIndex -> last-seen randomBit, only recorded while the loop is active. */
+    this.loopBits = new Map();
+    this.loopActive = false;
     this.running = false;
     /** Repaint only when something actually changed; see frame(). */
     this.dirty = true;
@@ -70,21 +81,58 @@ export class EuclidView {
 
   setPattern(pattern) {
     const next = pattern.length ? pattern : [0];
-    // A change in step count invalidates the fired indices. Rotation and pulse
-    // changes keep the length, so their marks stay meaningful and are left alone
-    // rather than flickering off on every drag.
-    if (next.length !== this.pattern.length) this.fired.clear();
+    // A change in step count invalidates the fired and loop-buffer indices.
+    // Rotation and pulse changes keep the length, so their marks stay meaningful
+    // and are left alone rather than flickering off on every drag.
+    if (next.length !== this.pattern.length) {
+      this.fired.clear();
+      this.loopBits.clear();
+    }
     this.pattern = next;
     this.dirty = true;
   }
 
-  /** Called when the scheduler decides a step, well before it sounds. */
-  enqueue(step) {
+  /**
+   * Called when the scheduler decides a step, well before it sounds.
+   * `loopSnapshot`, when given, is a full projection of the rhythm loop's next
+   * `steps` random bits (see Track.getTrigLoopWindow) -- attached only to the
+   * one step per revolution that starts a new lap (see main.js), and applied
+   * at the same audio-clock-gated moment as the rest of this step, in frame(),
+   * rather than immediately.
+   */
+  enqueue(step, loopSnapshot) {
     this.queue.push({
       stepIndex: step.stepIndex,
       audioTime: step.audioTime,
       triggered: step.triggered,
+      loopSnapshot,
     });
+  }
+
+  /**
+   * Whether the rhythm loop is currently capturing/replaying a frozen window of
+   * the random-bit register (see TriggerGenerator/HistoryBuffer). Turning it on
+   * clears any earlier reading; the caller (main.js) immediately follows with a
+   * fresh setLoopSnapshot() call, and again every time the playhead completes a
+   * revolution.
+   */
+  setLoopActive(active) {
+    this.loopActive = Boolean(active);
+    this.loopBits.clear();
+    this.dirty = true;
+  }
+
+  /**
+   * Replace the loop-buffer overlay wholesale with a freshly projected window,
+   * one value per ring position, all updating together rather than one
+   * position at a time as the playhead happens to pass it. A loop shorter than
+   * the ring's step count repeats circularly to fill it -- see HistoryBuffer's
+   * loopWindow, which already does that math; this just paints the result.
+   */
+  setLoopSnapshot(values) {
+    this.loopBits.clear();
+    for (let i = 0; i < values.length; i += 1) this.loopBits.set(i, values[i]);
+    this.dirty = true;
   }
 
   setRunning(running) {
@@ -92,8 +140,9 @@ export class EuclidView {
     if (!running) {
       this.queue.length = 0;
       this.currentStep = -1;
-      // Otherwise the fired bands stay lit on a stopped ring.
+      // Otherwise the fired/loop-buffer bands stay lit on a stopped ring.
       this.fired.clear();
+      this.loopBits.clear();
     }
     this.dirty = true;
   }
@@ -106,6 +155,9 @@ export class EuclidView {
       const step = this.queue.shift();
       this.currentStep = step.stepIndex;
       this.fired.set(step.stepIndex, step.triggered);
+      // Only while active: a snapshot queued before the loop was turned off
+      // should not silently repopulate the overlay after the fact.
+      if (step.loopSnapshot && this.loopActive) this.setLoopSnapshot(step.loopSnapshot);
       this.dirty = true;
     }
     // While running a step promotes every few frames, so this is effectively
@@ -142,6 +194,18 @@ export class EuclidView {
     // that at 32 steps the wedges stay visible instead of collapsing into gaps.
     const gap = Math.min(sweep * 0.22, 5 / outerR);
 
+    // While the loop is active, the main band splits radially into two equal
+    // halves -- Euclid pulse and random pulse read as equally important inputs
+    // to the outcome, so neither one gets to be the whole ring while the other
+    // is a thin afterthought outside it. A small seam (left unfilled, like the
+    // angular gaps between sectors) separates them. Inactive, there is no
+    // random bit worth showing, so Euclid pulse keeps the whole band, exactly
+    // as before.
+    const seam = 2;
+    const mid = (innerR + outerR) / 2;
+    const euclidInner = this.loopActive ? mid + seam / 2 : innerR;
+    const randomOuter = mid - seam / 2;
+
     for (let i = 0; i < steps; i += 1) {
       // Step 0 begins at 12 o'clock and time runs clockwise.
       const start = -Math.PI / 2 + i * sweep;
@@ -151,9 +215,11 @@ export class EuclidView {
       const isPulse = this.pattern[i] === 1;
       const isPlayhead = i === this.currentStep;
       const didFire = this.fired.get(i);
+      const isRandomOn = this.loopBits.get(i) === 1;
 
-      // Solid = the Euclidean pattern has a pulse here; faint = it does not.
-      this.#sectorPath(cx, cy, innerR, outerR, a0, a1);
+      // Euclid pulse: the outer half while split, the whole band otherwise.
+      // Solid = the pattern has a pulse here; faint = it does not.
+      this.#sectorPath(cx, cy, euclidInner, outerR, a0, a1);
       if (isPulse) {
         ctx.fillStyle = isPlayhead ? '#a8dcff' : '#4a90b8';
         ctx.fill();
@@ -167,6 +233,27 @@ export class EuclidView {
         ctx.stroke();
       }
 
+      // Random pulse: the inner half, only while the loop is active. Same
+      // solid/faint treatment as Euclid pulse, warm-toned rather than blue so
+      // the two halves read as related but distinct.
+      if (this.loopActive) {
+        this.#sectorPath(cx, cy, innerR, randomOuter, a0, a1);
+        if (isRandomOn) {
+          ctx.fillStyle = isPlayhead ? '#f3dcae' : 'rgba(224, 184, 111, 0.9)';
+          ctx.fill();
+        } else {
+          ctx.fillStyle = isPlayhead
+            ? 'rgba(224, 184, 111, 0.30)'
+            : 'rgba(255, 255, 255, 0.05)';
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+
+      // The playhead outline frames the whole step -- both halves together,
+      // when split -- since it names which step is current, not which half.
       if (isPlayhead) {
         this.#sectorPath(cx, cy, innerR, outerR, a0, a1);
         ctx.strokeStyle = '#cfeaff';
@@ -174,9 +261,9 @@ export class EuclidView {
         ctx.stroke();
       }
 
-      // A green band outside the rim means the step actually triggered a note.
-      // Where that disagrees with the sector fill, the logic operator or the
-      // random stream changed the outcome.
+      // A small green band outside the rim means the step actually triggered
+      // a note. Where that disagrees with the sector fill, the logic operator
+      // or the random stream changed the outcome.
       if (didFire) {
         this.#sectorPath(cx, cy, outerR + 3, outerR + 7, a0, a1);
         ctx.fillStyle = 'rgba(130, 230, 150, 0.9)';
