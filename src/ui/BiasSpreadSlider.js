@@ -1,32 +1,28 @@
-import { DragNumber } from './DragNumber.js';
+import { DragNumber, FINE_DIVISOR, FULL_RANGE_PX } from './DragNumber.js';
+import { axisLockIcon } from './icons.js';
 import { clamp, formatNumber, quantize } from './numberUtils.js';
 import { midiNoteName } from './noteNames.js';
 
 /** Smallest allowed gap between the axis's min and max, as a fraction of its hard range. */
 const MIN_GAP_FRACTION = 0.02;
 
-/** Scroll distance spent per spread increment during a rapid wheel run. */
-const WHEEL_NOTCH_PX = 50;
-
 /**
- * A wheel event this long after the previous one applies a full notch
- * immediately, whatever its deltaY. Timing, not magnitude: some mice report a
- * click with a deltaY no bigger than one frame of trackpad momentum, so a
- * magnitude threshold either ignores real clicks or lets swipes through.
+ * Movement, in either direction from the press, before a locked drag commits to an
+ * axis. Small enough to feel immediate, big enough to absorb the jitter a plain click
+ * produces before any drag was intended.
  */
-const ISOLATED_EVENT_GAP_MS = 120;
+const AXIS_LOCK_THRESHOLD_PX = 4;
 
 /**
- * Plain-scroll increment for spread, per the axis's `display` kind. Velocity
- * spread lives on 0.1..1, where a literal 1 exceeds the whole range and every
- * notch would jump to an extreme.
- */
-const WHEEL_COARSE_STEP = { percent: 0.01, semitones: 1 };
-
-/**
- * One horizontal slider per bias/spread pair: the handle is the bias, drag moves
- * it, the wheel adjusts spread as a band spanning bias±spread beneath it.
- * Shift+scroll drops to the schema's own step.
+ * One slider per bias/spread pair, driven by a single drag along two axes: the
+ * handle's horizontal position is the bias -- jump-to-click, exactly where the
+ * pointer lands -- and vertical travel from wherever the drag started is the
+ * spread, the same delta-driven gesture DragNumber and FillIconControl use
+ * elsewhere (shift for finer). One pointer gesture, two independent reads of it,
+ * rather than a second input method (the wheel) for the second axis.
+ *
+ * A per-instance toggle can constrain a drag to whichever axis moves first --
+ * see #bindTrack -- for fine-tuning one value without the other drifting.
  *
  * Spread reads as an attribute of the handle rather than a second axis because in
  * the narrow regime the generator draws `gauss(bias, spread)` -- the band is
@@ -41,7 +37,7 @@ export class BiasSpreadSlider {
    * @param {import('../core/EventBus.js').EventBus} opts.bus
    * @param {number} [opts.trackId]
    * @param {object} opts.biasSpec    paramSchema entry for the handle position
-   * @param {object} opts.spreadSpec  paramSchema entry for the wheel-adjusted band
+   * @param {object} opts.spreadSpec  paramSchema entry for the vertical-drag band
    * @param {string} opts.title       heading, e.g. "Note"
    */
   constructor({ bus, trackId = 0, biasSpec, spreadSpec, title }) {
@@ -51,6 +47,12 @@ export class BiasSpreadSlider {
     this.spreadSpec = spreadSpec;
     this.title = title;
     this.dragging = false;
+    // Pure interaction preference, not a sound parameter: no schema entry, no
+    // param:change, not persisted across reload -- same treatment as `range` below.
+    this.axisLocked = false;
+    // Which axis a locked drag has committed to, decided once per gesture in
+    // #bindTrack and cleared on release. Meaningless while axisLocked is false.
+    this.activeAxis = null;
 
     this.bias = biasSpec.def;
     this.spread = spreadSpec.def;
@@ -61,12 +63,6 @@ export class BiasSpreadSlider {
     // the bias and clipped to the schema's range, so narrowing this does not
     // narrow what actually gets produced.
     this.range = { min: biasSpec.min, max: biasSpec.max };
-    // Sub-notch scroll distance not yet converted into a spread change; see
-    // WHEEL_NOTCH_PX.
-    this.wheelAccum = 0;
-    // -Infinity so the very first wheel event is always treated as isolated --
-    // it cannot be a continuation of a run that hasn't started yet.
-    this.lastWheelTime = -Infinity;
 
     this.#build(title);
     this.#bindTrack();
@@ -82,9 +78,14 @@ export class BiasSpreadSlider {
     const titleEl = document.createElement('span');
     titleEl.className = 'bsslider__title';
     titleEl.textContent = title;
+
+    const heading = document.createElement('div');
+    heading.className = 'bsslider__heading';
+    heading.append(titleEl, this.#buildAxisToggle(title));
+
     this.readoutEl = document.createElement('span');
     this.readoutEl.className = 'bsslider__readout';
-    header.append(titleEl, this.readoutEl);
+    header.append(heading, this.readoutEl);
 
     this.trackEl = document.createElement('div');
     this.trackEl.className = 'bsslider__track';
@@ -110,6 +111,35 @@ export class BiasSpreadSlider {
 
     root.append(header, body);
     this.element = root;
+  }
+
+  /**
+   * The axis-lock toggle: free (both axes move together, the default) versus locked
+   * (a drag commits to whichever axis moves first, see #bindTrack). Purely a click,
+   * no drag of its own, so it lives in the header rather than on the track.
+   */
+  #buildAxisToggle(title) {
+    this.axisToggleEl = document.createElement('button');
+    this.axisToggleEl.type = 'button';
+    this.axisToggleEl.className = 'bsslider__axis-toggle';
+    this.axisToggleEl.setAttribute('aria-label', `${title}: constrain drag to one axis at a time`);
+    this.axisToggleEl.addEventListener('click', () => {
+      this.axisLocked = !this.axisLocked;
+      this.#renderAxisLock();
+    });
+
+    this.axisIconEl = document.createElement('span');
+    this.axisToggleEl.appendChild(this.axisIconEl);
+    this.#renderAxisLock();
+
+    return this.axisToggleEl;
+  }
+
+  #renderAxisLock() {
+    // No is-active button chrome here -- the icon's own arrow is the indicator (see
+    // icons.js), so a second highlight on the button around it would be redundant.
+    this.axisToggleEl.setAttribute('aria-pressed', String(this.axisLocked));
+    this.axisIconEl.replaceChildren(axisLockIcon(this.axisLocked));
   }
 
   /** One edge of the active bias range: a compact DragNumber flanking the track. */
@@ -241,24 +271,24 @@ export class BiasSpreadSlider {
     this.trackEl.setAttribute('aria-valuetext', `${biasText}, spread ${spreadText}`);
   }
 
-  /**
-   * Scale deltaY onto the pixel axis WHEEL_NOTCH_PX is calibrated against. Most
-   * browsers report pixels; Firefox and some configurations report LINE or PAGE
-   * units instead, which are much smaller and need scaling up to match.
-   */
-  #normalizeWheelDelta(e) {
-    if (e.deltaMode === 1) return e.deltaY * 16; // DOM_DELTA_LINE
-    if (e.deltaMode === 2) return e.deltaY * 800; // DOM_DELTA_PAGE
-    return e.deltaY; // DOM_DELTA_PIXEL
-  }
-
   #bindTrack() {
     const el = this.trackEl;
 
-    const commitFromPointer = (e) => {
+    const commitBiasFromPointer = (e) => {
       const rect = el.getBoundingClientRect();
       const frac = clamp((e.clientX - rect.left) / rect.width, 0, 1);
       this.#commitBias(this.range.min + frac * (this.range.max - this.range.min));
+    };
+
+    // Up is positive, matching DragNumber and FillIconControl's convention, and
+    // relative to where the drag started rather than to the track's height --
+    // spread's range varies per axis (0.9 for velocity, 40 for notes), so there
+    // is no one pixel-to-range mapping a fixed-height track could offer both.
+    const commitSpreadFromDelta = (e) => {
+      const dy = this.dragStartY - e.clientY;
+      let perPx = (this.spreadSpec.max - this.spreadSpec.min) / FULL_RANGE_PX;
+      if (e.shiftKey) perPx /= FINE_DIVISOR;
+      this.#commitSpread(this.dragStartSpread + dy * perPx);
     };
 
     el.addEventListener('pointerdown', (e) => {
@@ -267,54 +297,53 @@ export class BiasSpreadSlider {
       el.setPointerCapture(e.pointerId);
       this.dragging = true;
       el.classList.add('is-dragging');
-      // Jump-to-click, so a drag can start anywhere on the track, not only
-      // exactly on the handle.
-      commitFromPointer(e);
+      this.dragStartX = e.clientX;
+      this.dragStartY = e.clientY;
+      this.dragStartSpread = this.spread;
+      this.activeAxis = null;
+      // Jump-to-click, so a drag can start anywhere on the track, not only exactly
+      // on the handle -- but only when free. Locked defers this too: the whole
+      // point of the lock is that a drag which turns out to be vertical must leave
+      // bias untouched, including this initial jump.
+      if (!this.axisLocked) commitBiasFromPointer(e);
     });
 
     el.addEventListener('pointermove', (e) => {
       if (!this.dragging) return;
-      commitFromPointer(e);
+
+      if (!this.axisLocked) {
+        commitBiasFromPointer(e);
+        commitSpreadFromDelta(e);
+        return;
+      }
+
+      if (this.activeAxis === null) {
+        const dx = e.clientX - this.dragStartX;
+        const dy = e.clientY - this.dragStartY;
+        if (Math.abs(dx) < AXIS_LOCK_THRESHOLD_PX && Math.abs(dy) < AXIS_LOCK_THRESHOLD_PX) return;
+        // Whichever moved further at the instant either crosses the threshold wins,
+        // and that decision holds for the rest of this gesture -- it is not
+        // reconsidered even if the hand wanders back the other way later.
+        this.activeAxis = Math.abs(dx) >= Math.abs(dy) ? 'bias' : 'spread';
+        // The cursor confirms the same choice: narrows from the ambiguous move
+        // cursor to the one axis this drag now actually commits to.
+        el.classList.toggle('is-axis-x', this.activeAxis === 'bias');
+        el.classList.toggle('is-axis-y', this.activeAxis === 'spread');
+      }
+
+      if (this.activeAxis === 'bias') commitBiasFromPointer(e);
+      else commitSpreadFromDelta(e);
     });
 
     const endDrag = (e) => {
       if (!this.dragging) return;
       this.dragging = false;
-      el.classList.remove('is-dragging');
+      this.activeAxis = null;
+      el.classList.remove('is-dragging', 'is-axis-x', 'is-axis-y');
       if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
     };
     el.addEventListener('pointerup', endDrag);
     el.addEventListener('pointercancel', endDrag);
-
-    el.addEventListener('wheel', (e) => {
-      e.preventDefault();
-
-      // Plain scroll moves by a coarse step sized to the axis's own display
-      // (see WHEEL_COARSE_STEP); shift switches to the schema's own step for
-      // the finer adjustments the coarse one is too big for.
-      const coarse = WHEEL_COARSE_STEP[this.spreadSpec.display] ?? 1;
-      const increment = e.shiftKey ? this.spreadSpec.step : coarse;
-
-      const isolated = e.timeStamp - this.lastWheelTime > ISOLATED_EVENT_GAP_MS;
-      this.lastWheelTime = e.timeStamp;
-
-      if (isolated) {
-        // Respond immediately, and drop any accumulated distance so it can't leak
-        // across the gap into this gesture.
-        this.wheelAccum = 0;
-        const dir = e.deltaY < 0 ? 1 : -1;
-        this.#commitSpread(this.spread + dir * increment);
-        return;
-      }
-
-      // Part of a rapid run: accumulate distance and spend it only in whole
-      // notches, so many small events don't each apply a full increment.
-      this.wheelAccum += this.#normalizeWheelDelta(e);
-      const notches = Math.trunc(this.wheelAccum / WHEEL_NOTCH_PX);
-      if (notches === 0) return;
-      this.wheelAccum -= notches * WHEEL_NOTCH_PX;
-      this.#commitSpread(this.spread - notches * increment);
-    }, { passive: false });
 
     el.addEventListener('dblclick', () => {
       this.#commitBias(this.biasSpec.def);

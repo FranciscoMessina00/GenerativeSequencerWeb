@@ -408,8 +408,20 @@ input[type="range"]::-moz-range-thumb {
 .bsslider__header {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  /* Centered rather than baseline: the title now shares this row with a button, not
+     just the readout, and baseline resolution across a nested flex container (the
+     heading group below) is unnecessary fragility once title and toggle are both
+     ~11px single-line text -- center reads identically here. */
+  align-items: center;
   margin-bottom: 8px;
+}
+
+/* Groups the title with its axis-lock toggle so the pair sits together on the left
+   while the readout stays pinned right against .bsslider__header's space-between. */
+.bsslider__heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .bsslider__title {
@@ -424,6 +436,37 @@ input[type="range"]::-moz-range-thumb {
   font-variant-numeric: tabular-nums;
 }
 
+/* Sized down from the row-level icon buttons (.logic-op, .trig-loop__toggle): this one
+   sits inline against 11px text in a tight header, not as its own control in a row, so
+   it needs to read as small rather than as a peer of those. */
+.bsslider__axis-toggle {
+  display: flex;
+  align-items: center;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+.bsslider__axis-toggle .icon {
+  width: 16px;
+  height: 16px;
+}
+.bsslider__axis-toggle:hover,
+.bsslider__axis-toggle:focus-visible {
+  background: rgba(111, 184, 224, 0.09);
+  border-color: rgba(111, 184, 224, 0.28);
+  color: var(--text);
+  outline: none;
+}
+/* No is-active state here on purpose -- the icon's own brightness is the state
+   indicator (see .icon.is-unpaired below), so this button never gets the
+   engaged-signature box other toggles in this app use; a second highlight around it
+   would just repeat the icon. */
+
 .bsslider__body {
   display: flex;
   align-items: center;
@@ -434,12 +477,20 @@ input[type="range"]::-moz-range-thumb {
   position: relative;
   flex: 1;
   height: 28px;
-  cursor: ew-resize;
+  /* A drag here reads both axes -- horizontal for bias, vertical for spread --
+     so the resize-style horizontal-only cursor would misdescribe it. Free mode never
+     leaves this; a locked drag narrows it once its axis is decided -- see below. */
+  cursor: move;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
 .bsslider__track:focus-visible { outline: none; }
+
+/* Set for the rest of a locked gesture once BiasSpreadSlider has decided which axis it
+   commits to, so the cursor confirms the same choice the drag has already made. */
+.bsslider__track.is-axis-x { cursor: ew-resize; }
+.bsslider__track.is-axis-y { cursor: ns-resize; }
 
 /*
  * Rail, band and handle all share the same vertical centre now -- stacked in
@@ -659,10 +710,13 @@ input[type="range"]::-moz-range-thumb {
 
 /* ---- icons: the shared line-art rules for everything out of ui/icons.js ---- */
 
-/* Sized by the host, since a 24px gate and a 20px loop want different footprints. */
+/* Sized by the host, since a 24px gate and a 20px loop want different footprints.
+   Transition covers the axis-lock icon's dim/bright state change below -- harmless
+   elsewhere, since no other icon ever changes its opacity. */
 .icon {
   display: block;
   overflow: visible;
+  transition: opacity 0.12s;
 }
 
 /* Unfilled strokes taking their colour from the host's `color`, so one hover rule on a
@@ -684,6 +738,14 @@ input[type="range"]::-moz-range-thumb {
 .icon .icon__dot {
   fill: currentColor;
   stroke: none;
+}
+
+/* The axis-lock icon: bright while the two axes are paired (one drag moves both),
+   dimmed once locked (each moves alone) -- the glyph's own brightness says whether it
+   currently does anything, the same signal .fillicon.is-inactive gives permutation
+   when its loop is off. */
+.icon.is-unpaired {
+  opacity: 0.2;
 }
 
 /* ---- trigger row: logic, probability and the rhythm loop as glyphs ---- */

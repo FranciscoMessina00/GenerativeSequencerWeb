@@ -126,8 +126,8 @@ ui.renderGroups(document.getElementById('rhythm-controls'), ['Rhythm'], {
   skip: [...HUB_KEYS, ...TRIG_KEYS],
   prepend: { Rhythm: trigRow },
 });
-// Bias/spread pairs get one combined slider instead of two: the handle is the
-// bias, the wheel adjusts spread.
+// Bias/spread pairs get one combined slider instead of two: horizontal drag sets
+// the bias, vertical drag sets the spread -- see BiasSpreadSlider.js.
 const BIAS_SPREAD_AXES = {
   Pitch: { bias: 'noteBias', spread: 'noteSpread', title: 'Note' },
   Velocity: { bias: 'velBias', spread: 'velSpread', title: 'Velocity' },

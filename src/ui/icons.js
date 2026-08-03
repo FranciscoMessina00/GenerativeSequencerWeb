@@ -6,8 +6,8 @@
  * repaints its icon with it and no glyph carries a palette of its own.
  *
  * Geometry is written directly rather than pulled from an icon font or a sprite sheet:
- * these are five shapes, and a dependency-free project pays for a font in bytes and a
- * flash of unstyled text.
+ * these are a handful of shapes, and a dependency-free project pays for a font in bytes
+ * and a flash of unstyled text.
  */
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -111,4 +111,25 @@ export function crossArrowsIcon() {
     path('M4 5 L19 19'),
     points('14.5,19 19,19 19,14.5'),
   );
+}
+
+/**
+ * The axis-lock toggle's glyph: a horizontal double-arrow crossing a vertical one, the
+ * same shape as the platform's own "move" cursor -- deliberately, since that cursor is
+ * exactly what free mode leaves the drag track showing (see BiasSpreadSlider.js).
+ *
+ * One glyph, not two: locked dims the whole thing rather than swapping to a different
+ * shape, since brightness alone says whether the two axes currently move together.
+ */
+export function axisLockIcon(locked) {
+  const svg = svgEl('svg', { viewBox: '0 0 24 24', class: locked ? 'icon is-unpaired' : 'icon' });
+  svg.append(
+    path('M12 3 V21'),
+    path('M3 12 H21'),
+    points('9,6 12,3 15,6'),
+    points('9,18 12,21 15,18'),
+    points('6,9 3,12 6,15'),
+    points('18,9 21,12 18,15'),
+  );
+  return svg;
 }
