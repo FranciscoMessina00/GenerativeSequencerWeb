@@ -144,8 +144,11 @@ test('modulation: respects the 2..20 plucking-position range', () => {
 });
 
 test('post-processing is applied on read', () => {
-  // Notes quantise; velocity passes through; modulation folds into range.
+  // Notes quantise, rooted at the bias; velocity passes through; modulation folds into range.
   assert.equal(NOTE_DISTRIBUTION.post(60.4, { scale: 1 }), 60);
+  // Major, rooted at C# (61): a D natural (62) ties downward to the root itself,
+  // rather than staying put the way it would in a scale anchored at C.
+  assert.equal(NOTE_DISTRIBUTION.post(62, { scale: 2, bias: 61 }), 61);
   assert.equal(VELOCITY_DISTRIBUTION.post(0.42), 0.42);
   assert.equal(MOD_DISTRIBUTION.post(21, {}), 19);
 });

@@ -40,15 +40,25 @@ export function nearestInList(value, list) {
 }
 
 /**
- * Quantise a (possibly fractional) MIDI note to the given scale.
+ * Quantise a (possibly fractional) MIDI note to the given scale, rooted at `root`.
  *
- * The octave is taken first and the remainder snapped inside it, so quantisation
- * deliberately does NOT wrap across the octave boundary: in major pentatonic
- * 11.6 snaps down to 9 rather than up to the next octave's 12. The asymmetry is
+ * `root` is the note that counts as scale degree 0 -- normally the bias, so the scale
+ * is always built on whichever note the bias slider is currently sitting on, rather
+ * than always snapping to the same pitch classes anchored at C regardless of where
+ * the bias is. That also means the bias itself is always in scale by construction:
+ * dragging it never gets pulled to some other "nearest" note. Omitting `root` (or
+ * passing 0) anchors the scale at C, as before.
+ *
+ * The octave is taken first, relative to the root rather than to C, and the
+ * remainder snapped inside it, so quantisation deliberately does NOT wrap across the
+ * octave boundary: in major pentatonic a note 11.6 semitones above the root snaps
+ * down to 9 above it rather than up to the 12 of the next octave. The asymmetry is
  * audible -- notes near the top of an octave get pulled down -- and intended.
  */
-export function nearestInScale(note, degrees) {
-  const octave = Math.floor(note / 12) * 12;
-  const pitchClass = note - octave;
-  return octave + nearestInList(pitchClass, degrees);
+export function nearestInScale(note, degrees, root = 0) {
+  const rootPitchClass = ((Math.floor(root) % 12) + 12) % 12;
+  const shifted = note - rootPitchClass;
+  const octave = Math.floor(shifted / 12) * 12;
+  const pitchClass = shifted - octave;
+  return rootPitchClass + octave + nearestInList(pitchClass, degrees);
 }

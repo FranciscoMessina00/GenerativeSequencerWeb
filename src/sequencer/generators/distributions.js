@@ -37,8 +37,12 @@ export const NOTE_DISTRIBUTION = {
     rng.coin(0.5)
       ? clip(rng.gauss(41 - spread, 40.1 - spread), 1, 60)
       : clip(rng.gauss(87 + spread, 40.1 - spread), 60, 127),
-  /** Quantisation happens on read, after looping, so a loop can be re-scaled live. */
-  post: (value, params) => nearestInScale(value, scaleById(params.scale).degrees),
+  /**
+   * Quantisation happens on read, after looping, so a loop can be re-scaled live.
+   * Rooted at the bias, so the scale follows wherever the bias slider is set rather
+   * than always being anchored at C -- see nearestInScale.
+   */
+  post: (value, params) => nearestInScale(value, scaleById(params.scale).degrees, params.bias),
   initial: (rng) => rng.randRange(60, 72),
 };
 

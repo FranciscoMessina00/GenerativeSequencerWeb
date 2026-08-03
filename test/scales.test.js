@@ -78,3 +78,31 @@ test('octave placement is preserved', () => {
   assert.equal(nearestInScale(72, major), 72);
   assert.equal(nearestInScale(48.1, major), 48);
 });
+
+test('a root transposes the scale instead of always anchoring it at C', () => {
+  const major = scaleById(2).degrees;
+  // Rooted at C# (61) the scale is C# D# F F# G# A# C. A D natural (62) sits exactly
+  // between the root and the next degree up, so the downward tie pulls it to the root.
+  assert.equal(nearestInScale(62, major, 61), 61);
+  // The same note, same scale, anchored at C (the default) is untouched: D natural
+  // is already in C major.
+  assert.equal(nearestInScale(62, major), 62);
+});
+
+test('the root is always in scale, whatever the root or the scale', () => {
+  // Bias -- the root in practice -- is always an integer MIDI note (see paramSchema),
+  // which is what makes this exact: a fractional root would lose its own fraction to
+  // the pitch-class floor and so would not necessarily round-trip.
+  for (const scale of SCALES) {
+    for (const root of [0, 1, 51, 60, 61, 127]) {
+      assert.equal(nearestInScale(root, scale.degrees, root), root, `${scale.name} @ ${root}`);
+    }
+  }
+});
+
+test('the octave boundary is measured from the root, not from C', () => {
+  // Same asymmetric pull-down as the C-anchored case (see above), just offset: 11.6
+  // semitones above a root of 1 snaps down to 9 above it, not up to 12 above it.
+  const pent = scaleById(4).degrees;
+  assert.equal(nearestInScale(1 + 11.6, pent, 1), 1 + 9);
+});
