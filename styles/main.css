@@ -984,6 +984,157 @@ input[type="range"]::-moz-range-thumb {
 .trig-loop .dragnum__value { font-size: 17px; line-height: 24px; }
 .trig-loop .dragnum__label { line-height: 13px; }
 
+/* ---- lfo: waveform scope plus its controls ---- */
+
+.lfo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Fixed height rather than an aspect ratio: a panel column is minmax(240px, 1fr), so
+   a ratio would make the scope twice as tall in a wide window as in a narrow one for
+   no gain -- one cycle is one cycle. */
+.lfo__scope {
+  /* 66px of content after the border. At 50 the curve had only 40px peak-to-peak,
+     which is too squat to tell a folded sine from a triangle -- and the shape being
+     legible at a glance is the entire point of the panel. */
+  height: 68px;
+  background: #0e1116;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* display:block matters: an inline canvas picks up baseline whitespace and then its
+   measured rect never matches the box it is supposed to fill. */
+.lfo__canvas { display: block; width: 100%; height: 100%; }
+
+.lfo__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+/* The rate row hides whichever of its two controls is not in use, and both of them
+   set their own `display` -- which beats [hidden]'s display:none from the UA
+   stylesheet, so without this the free rate and the synced division show at once. */
+.lfo [hidden] { display: none; }
+.lfo__row--shape { flex-direction: column; align-items: stretch; gap: 3px; }
+.lfo__row--depth { justify-content: space-between; }
+
+.lfo__header { display: flex; justify-content: space-between; align-items: baseline; }
+.lfo__label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* The name of the nearest shape is the whole readout -- what the morph is actually
+   doing is visible in the scope, so a number here would say less than the picture. */
+.lfo__value { font-size: 11px; color: var(--text); }
+
+.lfo__slider { width: 100%; }
+
+/* Same letter-button treatment as the step division's T and D, since it does the same
+   job: a small always-visible toggle that changes what the neighbouring control means. */
+.lfo__sync {
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+.lfo__sync:hover, .lfo__sync:focus-visible {
+  border-color: rgba(111, 184, 224, 0.28);
+  color: var(--text);
+  outline: none;
+}
+/* The project's engaged signature, as used by .step-division__mod. */
+.lfo__sync.is-active {
+  background: rgba(111, 184, 224, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Glyph over a caption, matching .trig-loop__toggle, so it reads as a peer of the
+   other icon buttons rather than as a different kind of thing. */
+.lfo__map {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+.lfo__map .icon { width: 20px; height: 20px; }
+.lfo__map:hover, .lfo__map:focus-visible {
+  background: rgba(111, 184, 224, 0.09);
+  border-color: rgba(111, 184, 224, 0.28);
+  color: var(--text);
+  outline: none;
+}
+.lfo__map.is-active {
+  background: rgba(111, 184, 224, 0.16);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.lfo__map-label {
+  height: 13px;
+  font-size: 10px;
+  line-height: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: inherit;
+}
+
+/* Names the destination, which the Map button has no room for. Fixed height so
+   swapping between a name, "Not mapped" and the assigning prompt never reflows the
+   panel and shifts the controls above it. */
+.lfo__target {
+  height: 13px;
+  font-size: 10px;
+  line-height: 13px;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lfo__target.is-unmapped { color: var(--muted); }
+.lfo__target.is-assigning { color: var(--accent-2); }
+
+/* ---- modulation assignment: what can be mapped, and what is ---- */
+
+/* Only while the Map button is armed. A dashed ring rather than the usual solid
+   engaged border, because this is an invitation to click rather than a state the
+   control is in. */
+.is-mod-eligible {
+  outline: 1px dashed rgba(111, 184, 224, 0.55);
+  outline-offset: 2px;
+  border-radius: 4px;
+  cursor: crosshair;
+}
+/* Persistent, so what the LFO is moving stays visible after assigning. Green, the
+   colour already used for "this actually fired", not the accent blue that every
+   hover state uses. */
+.is-modulated {
+  outline: 1px solid rgba(130, 230, 150, 0.5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 /* ---- info bar: pinned footer, marquees when the description overruns ---- */
 
 /* The mirror of the header's sticky treatment -- panel fill, a --line rule on the

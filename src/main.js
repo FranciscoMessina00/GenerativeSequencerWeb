@@ -17,7 +17,10 @@ import { StepDivisionControl } from './ui/StepDivisionControl.js';
 import { LogicOpControl } from './ui/LogicOpControl.js';
 import { FillIconControl } from './ui/FillIconControl.js';
 import { TrigLoopControl } from './ui/TrigLoopControl.js';
+import { LfoPanel } from './ui/LfoPanel.js';
 import { InfoBar } from './ui/InfoBar.js';
+import { Modulation } from './modulation/Modulation.js';
+import { MOD_TARGETS } from './modulation/modTargets.js';
 import { diceIcon } from './ui/icons.js';
 import { SCALES } from './sequencer/scales.js';
 
@@ -54,6 +57,22 @@ let view;
 // reason the ring's own routing closure below needs to touch it.
 const legendRandomEl = document.getElementById('legend-random');
 
+// Which engine owns a param, and nothing else -- no UI side effects.
+//
+// Split out of the routing closure below because it has a second caller: the LFO
+// writes modulated values through here too, deliberately going around the store so
+// that the value the user dialled in stays the authoritative one and their controls
+// stay still. See modulation/Modulation.js.
+const writeToEngine = (key, value, trackId, spec) => {
+  if (spec.target === 'track') tracks[trackId]?.setParam(key, value);
+  else if (spec.target === 'transport') scheduler.setParam(key, value);
+  else if (spec.target === 'voice') audio.setParam(key, value);
+};
+
+// Assigned below, once the store exists for it to read base values from.
+/** @type {import('./modulation/Modulation.js').Modulation | undefined} */
+let modulation;
+
 // The one authoritative copy of every parameter. It owns writing to the engines and
 // announces each committed value as `param:changed`, which is what lets a preset or
 // a MIDI message move the controls.
@@ -61,8 +80,14 @@ const store = new ParamStore({
   bus,
   trackCount: tracks.length,
   route: (key, value, trackId, spec) => {
+    if (spec.target === 'modulation') {
+      // Not an engine: these configure the LFO itself.
+      modulation?.setParam(key, value);
+      return;
+    }
+    writeToEngine(key, value, trackId, spec);
+
     if (spec.target === 'track') {
-      tracks[trackId]?.setParam(key, value);
       // The ring is a picture of the Euclidean pattern, so refresh it when the
       // pattern parameters move.
       if (key === 'steps' || key === 'pulses' || key === 'rotation') {
@@ -83,12 +108,17 @@ const store = new ParamStore({
         // projection until the next revolution happens to complete.
         view?.setLoopSnapshot(tracks[trackId].getTrigLoopWindow(tracks[trackId].getPattern().length));
       }
-    } else if (spec.target === 'transport') {
-      scheduler.setParam(key, value);
-    } else if (spec.target === 'voice') {
-      audio.setParam(key, value);
     }
   },
+});
+
+// The LFO. It reads base values out of the store and writes modulated ones straight to
+// the engines, so the store keeps owning what the user actually set.
+modulation = new Modulation({
+  store,
+  write: writeToEngine,
+  getBarSeconds: () => scheduler.barDuration,
+  trackId: VISIBLE_TRACK,
 });
 
 // The parameters that define the Euclidean pattern live inside the ring, since they are
@@ -214,21 +244,38 @@ const velocityPrepend = document.createElement('div');
 velocityPrepend.append(sliderPrepend.Velocity, velLoopControl.element);
 sliderPrepend.Velocity = velocityPrepend;
 
-// Modulation used to hold pluck interpolation and its own loop; both are gone, and
-// pluck position itself moved to String (see BIAS_SPREAD_AXES above). The group has
-// no schema entries left, so an empty-but-truthy prepend is what keeps its heading
-// visible -- the same mechanism Rhythm's own prepend-only section relies on below.
-sliderPrepend.Modulation = document.createElement('div');
+// The Modulation group is nothing but the LFO panel: every one of its schema entries
+// is drawn by the panel itself, so all eight are skipped below to stop renderGroups
+// also emitting them as plain sliders underneath.
+const LFO_KEYS = [
+  'lfoShape', 'lfoRate', 'lfoSync', 'lfoDivision',
+  'lfoSyncMod', 'lfoFold', 'lfoAmount', 'lfoTarget',
+];
+const lfoPanel = new LfoPanel({
+  bus,
+  trackId: VISIBLE_TRACK,
+  shapeSpec: paramSpec('lfoShape'),
+  rateSpec: paramSpec('lfoRate'),
+  syncSpec: paramSpec('lfoSync'),
+  divisionSpec: paramSpec('lfoDivision'),
+  syncModSpec: paramSpec('lfoSyncMod'),
+  foldSpec: paramSpec('lfoFold'),
+  amountSpec: paramSpec('lfoAmount'),
+  targetSpec: paramSpec('lfoTarget'),
+  getPhase: () => modulation?.phaseAt(audio.currentTime) ?? 0,
+  onMapRequest: () => toggleAssignMode(),
+});
+sliderPrepend.Modulation = lfoPanel.element;
 
-// Group order and membership no longer track PARAM_GROUPS: Modulation has no schema
-// entries of its own anymore, so it would otherwise vanish from a schema-derived list.
+// Group order and membership no longer track PARAM_GROUPS: the order here is the
+// on-screen order, which the schema's own ordering has no reason to dictate.
 const CONTROL_GROUPS = ['Pitch', 'Velocity', 'Modulation', 'String', 'Granulator', 'Transport'];
 
 ui.renderGroups(
   document.getElementById('controls'),
   CONTROL_GROUPS,
   {
-    skip: [...sliderSkipKeys, ...NOTE_LOOP_KEYS, ...VEL_LOOP_KEYS, 'scale', 'glideAmount', 'glideMode'],
+    skip: [...sliderSkipKeys, ...NOTE_LOOP_KEYS, ...VEL_LOOP_KEYS, ...LFO_KEYS, 'scale', 'glideAmount', 'glideMode'],
     prepend: sliderPrepend,
   },
 );
@@ -278,6 +325,7 @@ registerKeyed(stepDivisionControl);
 registerKeyed(trigLoopControl);
 registerKeyed(noteLoopControl);
 registerKeyed(velLoopControl);
+registerKeyed(lfoPanel);
 for (const slider of Object.values(biasSpreadSliders)) registerKeyed(slider);
 registerLeaf(scaleDropdown);
 registerLeaf(logicOpControl);
@@ -311,6 +359,85 @@ bus.on('step', (step) => {
     wrapped ? tracks[VISIBLE_TRACK].getTrigLoopWindow(tracks[VISIBLE_TRACK].getPattern().length) : undefined,
   );
   ui.pushStep(step);
+  // Sampled here rather than on an animation frame: this path runs off the
+  // scheduler's Worker timer, so it keeps modulating in a hidden tab where a
+  // requestAnimationFrame loop would stall while the sequence played on.
+  if (step.trackId === VISIBLE_TRACK) modulation.onStep(step);
+});
+
+// ---------------------------------------------------------------------------
+// Modulation assignment
+// ---------------------------------------------------------------------------
+
+// Which controls the LFO is allowed to point at, by param key.
+const MOD_TARGET_KEYS = new Set(MOD_TARGETS.filter(Boolean));
+
+/**
+ * The first eligible param an element speaks for, or null.
+ *
+ * `data-info` can name more than one id -- the bias/spread track drives two params
+ * from one element -- so mapping takes the first eligible one. For that track it is
+ * the bias, which is the axis the horizontal drag controls and the more useful of
+ * the two to sweep.
+ */
+function targetKeyOf(element) {
+  const ids = (element.dataset.info ?? '').split(/\s+/);
+  return ids.find((id) => MOD_TARGET_KEYS.has(id)) ?? null;
+}
+
+let assigning = false;
+
+/**
+ * Assign mode: light up everything mappable, then bind whichever one is clicked.
+ *
+ * Page-level rather than something the panel does to itself, since it reaches every
+ * control on screen -- the same reason the info footer's hover delegation lives here.
+ * It needs no new markup: every control already carries `data-info` naming its param
+ * key, so that attribute doubles as the map of what is mappable.
+ */
+function setAssignMode(next) {
+  assigning = next;
+  lfoPanel.setAssigning(assigning);
+  for (const el of document.querySelectorAll('[data-info]')) {
+    el.classList.toggle('is-mod-eligible', assigning && Boolean(targetKeyOf(el)));
+  }
+}
+
+function toggleAssignMode() {
+  setAssignMode(!assigning);
+}
+
+/** Mark whatever is currently modulated, so it stays visible after assigning. */
+function renderModulatedMark() {
+  const key = MOD_TARGETS[store.get('lfoTarget', VISIBLE_TRACK)] ?? null;
+  for (const el of document.querySelectorAll('[data-info]')) {
+    el.classList.toggle('is-modulated', Boolean(key) && targetKeyOf(el) === key);
+  }
+}
+
+// Capture phase, so the click binds the control instead of operating it -- otherwise
+// picking a drag-number would also nudge its value.
+document.addEventListener('pointerdown', (e) => {
+  if (!assigning) return;
+  const host = e.target instanceof Element ? e.target.closest('[data-info]') : null;
+  const key = host ? targetKeyOf(host) : null;
+  if (!key) return;
+  e.preventDefault();
+  e.stopPropagation();
+  bus.emit('param:change', {
+    trackId: VISIBLE_TRACK,
+    key: 'lfoTarget',
+    value: MOD_TARGETS.indexOf(key),
+  });
+  setAssignMode(false);
+}, true);
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && assigning) setAssignMode(false);
+});
+
+bus.on('param:changed', ({ key }) => {
+  if (key === 'lfoTarget') renderModulatedMark();
 });
 
 // ---------------------------------------------------------------------------
@@ -354,6 +481,10 @@ const statusEl = document.getElementById('status');
 
 bus.on('transport:change', ({ running }) => {
   view.setRunning(running);
+  // Resets the LFO's phase on start, so a synced one is locked to the bar; on stop it
+  // hands the parameter it was driving back to the value the store holds.
+  modulation.setRunning(running);
+  lfoPanel.setRunning(running);
   playButton.textContent = running ? 'Stop' : 'Play';
   playButton.classList.toggle('active', running);
   if (!running) {
@@ -501,5 +632,5 @@ presets.loadFactoryPresets().then((list) => {
 //
 //   __seq.presets.toJSON(__seq.store.snapshot(__seq.rng.seed))
 /** @type {any} */ (window).__seq = {
-  bus, store, tracks, rng, audio, scheduler, presets, applySnapshot,
+  bus, store, tracks, rng, audio, scheduler, presets, applySnapshot, modulation,
 };

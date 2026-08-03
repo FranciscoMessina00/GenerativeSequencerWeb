@@ -1,0 +1,206 @@
+<!doctype html>
+<!-- Manual check for the LFO panel: the eight keys it owns, setValue not echoing, the
+     sync toggle swapping which rate control is shown, the shape readout naming the
+     nearest anchor, and the scope's curve and dot following shape/fold/phase. Browser-
+     only because it needs a real canvas measured by CSS. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+/* Fixed width so the scope's measured rect -- and therefore the dot's x -- is deterministic. */
+#mount{width:240px;}</style>
+</head>
+<body>
+<div id="mount"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { LfoPanel } from '../../src/ui/LfoPanel.js';
+import { lfoValue, shapeName } from '../../src/modulation/lfo.js';
+import { MOD_TARGETS } from '../../src/modulation/modTargets.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const bus = new EventBus();
+const events = [];
+bus.on('param:change', (e) => events.push(e));
+const emitted = () => events.map((e) => `${e.key}=${e.value}`).join(',');
+
+// Mirrors of the real paramSchema entries, so the panel is exercised on the same
+// shapes it gets in the app.
+const specs = {
+  shapeSpec: { key: 'lfoShape', label: 'LFO Shape', min: 0, max: 1, step: 0.01, def: 0 },
+  rateSpec: { key: 'lfoRate', label: 'LFO Rate', min: 0.1, max: 10, step: 0.01, def: 1 },
+  syncSpec: { key: 'lfoSync', label: 'LFO Sync', type: 'toggle', def: false },
+  divisionSpec: { key: 'lfoDivision', label: 'LFO Division', short: 'Div', values: [1,2,4,8,16,32], min: 1, max: 32, step: 1, def: 4, display: 'noteValue' },
+  syncModSpec: { key: 'lfoSyncMod', label: 'LFO Sync Modifier', values: [0,1,2], min: 0, max: 2, step: 1, def: 0, display: 'stepMod' },
+  foldSpec: { key: 'lfoFold', label: 'LFO Fold', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' },
+  amountSpec: { key: 'lfoAmount', label: 'LFO Amount', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' },
+  targetSpec: { key: 'lfoTarget', label: 'LFO Target', min: 0, max: 12, step: 1, def: 0 },
+};
+
+// A plain mutable phase stands in for the clock, and frame() is called by hand --
+// deterministic, and independent of LfoView's perpetually-rescheduling RAF chain.
+let phase = 0;
+let mapRequests = 0;
+const panel = new LfoPanel({
+  bus, trackId: 0, ...specs,
+  getPhase: () => phase,
+  onMapRequest: () => { mapRequests += 1; },
+});
+const view = panel.view;
+/** Mirrors LfoView's MARGIN_Y, so peak positions can be predicted here. */
+const MARGIN_Y = 5;
+
+// The scope must measure itself. It used to be handed a resize() call right here,
+// which is exactly what hid a bug where the canvas stayed 0x0 for the whole session
+// in the real app -- the panel is built detached, so the constructor's measurement is
+// all zeros and nothing in the app ever asked again. Two frames, because a
+// ResizeObserver callback is delivered asynchronously.
+log('-- it measures itself, with no resize() handed to it --');
+check('zero-sized before insertion', `${view.cssWidth}x${view.cssHeight}`, '0x0');
+check('drawing at zero size is a safe no-op', (() => { view.draw(); return 'ok'; })(), 'ok');
+document.getElementById('mount').appendChild(panel.element);
+await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+log('\n-- the keys it owns --');
+check('owns all eight', panel.keys().join(','),
+  'lfoShape,lfoRate,lfoSync,lfoDivision,lfoSyncMod,lfoFold,lfoAmount,lfoTarget');
+
+log('\n-- shape readout names the nearest anchor --');
+for (const [value, name] of [[0, 'Sine'], [1/3, 'Triangle'], [2/3, 'Saw'], [1, 'Square'], [0.05, 'Sine']]) {
+  panel.setValue('lfoShape', value);
+  check(`shape ${value.toFixed(2)}`, panel.element.querySelector('.lfo__value').textContent, name);
+}
+check('shape agrees with the pure helper', panel.element.querySelector('.lfo__value').textContent, shapeName(0.05));
+
+log('\n-- setValue never echoes back onto the bus --');
+events.length = 0;
+for (const [k, v] of Object.entries({
+  lfoShape: 0.5, lfoRate: 4, lfoSync: true, lfoDivision: 8,
+  lfoSyncMod: 1, lfoFold: 0.4, lfoAmount: 0.6, lfoTarget: 3,
+})) panel.setValue(k, v);
+check('nothing emitted', emitted(), '');
+
+log('\n-- sync swaps which rate control is shown --');
+// Asserted on computed display, not on the `hidden` property: both controls set their
+// own `display`, which outranks [hidden]'s UA display:none, so the attribute being set
+// is no proof at all that the thing is actually off screen.
+const shown = (el) => getComputedStyle(el).display !== 'none';
+panel.setValue('lfoSync', false);
+check('free: the Hz number is visible', shown(panel.rateControl.element), 'true');
+check('free: the division cluster is really gone', shown(panel.divisionControl.element), 'false');
+panel.setValue('lfoSync', true);
+check('synced: the Hz number is really gone', shown(panel.rateControl.element), 'false');
+check('synced: the division cluster is visible', shown(panel.divisionControl.element), 'true');
+check('never both at once', shown(panel.rateControl.element) !== shown(panel.divisionControl.element), 'true');
+check('the sync button lights', panel.element.querySelector('.lfo__sync').classList.contains('is-active'), 'true');
+
+log('\n-- clicking sync emits, and only once --');
+events.length = 0;
+panel.element.querySelector('.lfo__sync').click();
+check('emits the toggled value', emitted(), 'lfoSync=false');
+
+log('\n-- the division cluster is a real second StepDivisionControl --');
+check('it owns the LFO keys, not the Euclid ones', panel.divisionControl.keys().join(','), 'lfoDivision,lfoSyncMod');
+events.length = 0;
+panel.setValue('lfoDivision', 16);
+check('forwarded without emitting', emitted(), '');
+check('...and the readout followed', panel.divisionControl.divisionControl.valueEl.textContent, '1/16');
+
+log('\n-- the target readout names the destination --');
+panel.setValue('lfoTarget', 0);
+check('unmapped', panel.element.querySelector('.lfo__target').textContent, 'Not mapped');
+panel.setValue('lfoTarget', MOD_TARGETS.indexOf('grainDryWet'));
+check('mapped names the param', panel.element.querySelector('.lfo__target').textContent, '→ Grain Dry/Wet');
+
+log('\n-- the map button reports out rather than acting alone --');
+check('no requests yet', mapRequests, 0);
+panel.element.querySelector('.lfo__map').click();
+check('a click asks the page to start assigning', mapRequests, 1);
+panel.setAssigning(true);
+check('the button lights while armed', panel.element.querySelector('.lfo__map').classList.contains('is-active'), 'true');
+check('and the readout prompts', panel.element.querySelector('.lfo__target').textContent, 'Pick a control…');
+panel.setAssigning(false);
+check('unarming restores the target name', panel.element.querySelector('.lfo__target').textContent, '→ Grain Dry/Wet');
+
+// ---------------------------------------------------------------------------
+// The scope
+// ---------------------------------------------------------------------------
+log('\n-- the scope measures itself and tracks shape/fold --');
+check('it measured itself once in the document, with no help', view.cssWidth > 0, 'true');
+check('...and a real height too', view.cssHeight > 0, 'true');
+check('backing store is scaled by the device pixel ratio',
+  view.canvas.width, Math.max(1, Math.round(view.cssWidth * (window.devicePixelRatio || 1))));
+
+panel.setValue('lfoShape', 0);
+panel.setValue('lfoFold', 0);
+check('the view holds the shape it was given', `${view.shape},${view.fold}`, '0,0');
+panel.setValue('lfoFold', 1);
+check('...and the fold', view.fold, 1);
+
+// The curve is sampled through the same function the audio path uses, so the y it
+// draws is checkable against lfoValue directly rather than by reading pixels.
+const yFor = (p) => {
+  const mid = view.cssHeight / 2;
+  return mid - lfoValue(view.shape, view.fold, p) * (mid - MARGIN_Y);
+};
+panel.setValue('lfoShape', 0);
+panel.setValue('lfoFold', 0);
+check('an unfolded sine peaks near the top', Math.round(yFor(0.25)), Math.round(view.cssHeight / 2 - (view.cssHeight / 2 - 5)));
+panel.setValue('lfoFold', 1);
+check('fully folded, that same peak sits on the centre line', Math.round(yFor(0.25)), Math.round(view.cssHeight / 2));
+
+log('\n-- the marker follows the clock only while running --');
+view.setRunning(false);
+phase = 0.42;
+view.frame();
+check('stopped: phase is not read', view.phase, 0);
+view.setRunning(true);
+view.frame();
+check('running: phase follows the clock', view.phase, 0.42);
+phase = 0.77;
+view.frame();
+check('...and keeps following', view.phase, 0.77);
+check('a running scope repaints every frame', view.dirty, 'false');
+
+log('\n-- the marker has a real position, running or not --');
+panel.setValue('lfoShape', 0);
+panel.setValue('lfoFold', 0);
+const at = (p) => { phase = p; view.frame(); return view.markerPoint(); };
+const quarter = at(0.25);
+check('a quarter through sits a quarter across', Math.round(quarter.x), Math.round(view.cssWidth * 0.25));
+check('...and rides the curve to its peak', Math.round(quarter.y), MARGIN_Y);
+const threeQuarter = at(0.75);
+check('three quarters through sits three quarters across', Math.round(threeQuarter.x), Math.round(view.cssWidth * 0.75));
+check('...and at the trough', Math.round(threeQuarter.y), Math.round(view.cssHeight - MARGIN_Y));
+// Parked, not hidden: stopping must leave a drawable position behind.
+view.setRunning(false);
+const parked = view.markerPoint();
+check('stopping parks it rather than losing it', Number.isFinite(parked.x) && Number.isFinite(parked.y), 'true');
+check('...at the phase it had reached', Math.round(parked.x), Math.round(threeQuarter.x));
+
+// ---------------------------------------------------------------------------
+// Layout: nothing spills out of the panel
+// ---------------------------------------------------------------------------
+log('\n-- layout --');
+const panelBox = panel.element.getBoundingClientRect();
+const spills = [...panel.element.children].filter((child) => {
+  if (child.hidden) return false;
+  const b = child.getBoundingClientRect();
+  return b.left < panelBox.left - 0.5 || b.right > panelBox.right + 0.5;
+});
+check('every row sits inside the panel', spills.length, 0);
+log(`panel ${Math.round(panelBox.width)}x${Math.round(panelBox.height)}px; scope ${Math.round(view.cssWidth)}x${Math.round(view.cssHeight)}px`);
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'lfo-check-done' : 'lfo-check-failed';
+</script>
+</body>
+</html>

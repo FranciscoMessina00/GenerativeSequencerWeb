@@ -59,6 +59,16 @@ export const INFO_TEXT = {
   velLoop: 'Velocity Loop — freeze the recent velocities and repeat them.',
   velLoopLength: 'Velocity Loop Length — how many steps of velocities the frozen loop holds.',
 
+  // ---- Modulation ---------------------------------------------------------
+  lfoShape: 'LFO Shape — morphs the wave from sine through triangle and saw to square.',
+  lfoRate: 'LFO Rate — cycles per second, when the LFO is not following the transport.',
+  lfoSync: 'LFO Sync — follow the transport instead of a fixed rate in hertz.',
+  lfoDivision: 'LFO Division — one cycle per note value, when synced. Bigger number, faster.',
+  lfoSyncMod: 'LFO Sync Modifier — T bends the synced cycle to a triplet, D to a dotted note.',
+  lfoFold: 'LFO Fold — folds the peaks back down, from untouched to halved.',
+  lfoAmount: 'LFO Amount — how far it sweeps the parameter, either side of where you set it.',
+  lfoTarget: 'LFO Target — which parameter the LFO moves. Set it with Map.',
+
   // ---- Modal string voice -------------------------------------------------
   modBias: 'Pluck Position — where along the string it is plucked. Low is dead centre, high is near the bridge.',
   modSpread: 'Pluck Position Spread — how much that plucking point moves note to note.',
@@ -80,6 +90,9 @@ export const INFO_TEXT = {
   // The bias/spread axis-lock toggle: a view preference, deliberately not a schema
   // param and not persisted -- see BiasSpreadSlider.js.
   axisLock: 'Axis Lock — when off, a drag moves only the axis it starts along, instead of both at once.',
+  // The LFO's scope and its assign button: a picture and a mode, neither one a param.
+  lfoScope: 'LFO Scope — one cycle of the current shape, with a dot at the phase you are hearing.',
+  lfoMap: 'Map — press, then click any highlighted control to point the LFO at it. Escape cancels.',
   // Fallbacks for the generated `<key>.min` / `<key>.max` range-edge drag-numbers.
   'range.min': 'Range Low — the lowest value this slider can reach. Drag to change it.',
   'range.max': 'Range High — the highest value this slider can reach. Drag to change it.',

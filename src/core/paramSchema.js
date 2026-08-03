@@ -64,6 +64,28 @@ export const PARAM_SCHEMA = [
   { key: 'velLoop', label: 'Velocity Loop', group: 'Velocity', target: 'track', type: 'toggle', def: false },
   { key: 'velLoopLength', label: 'Velocity Loop Length', group: 'Velocity', short: 'Len', target: 'track', min: 1, max: 32, step: 1, def: 1 },
 
+  // ---- Modulation: one LFO source -----------------------------------------
+  // `target: 'modulation'` is not an engine -- these configure the LFO itself, so
+  // the routing closure hands them to the Modulation object rather than to a Track,
+  // the AudioEngine or the Scheduler. All eight are drawn by ui/LfoPanel.js, so
+  // `display` and `short` here reach aria text and readouts only.
+  //
+  // Amount and target both default to 0, which means the LFO ships inert: adding it
+  // changes no existing patch until something is mapped.
+  { key: 'lfoShape', label: 'LFO Shape', group: 'Modulation', target: 'modulation', min: 0, max: 1, step: 0.01, def: 0, display: 'lfoShape' },
+  { key: 'lfoRate', label: 'LFO Rate', group: 'Modulation', target: 'modulation', min: 0.1, max: 10, step: 0.01, def: 1 },
+  { key: 'lfoSync', label: 'LFO Sync', group: 'Modulation', target: 'modulation', type: 'toggle', def: false },
+  // Same division set and tri-state modifier as the Euclid step, so one synced cycle
+  // spans exactly what one step would -- see lfoPeriod().
+  { key: 'lfoDivision', label: 'LFO Division', short: 'Div', group: 'Modulation', target: 'modulation', values: [1, 2, 4, 8, 16, 32], min: 1, max: 32, step: 1, def: 4, display: 'noteValue' },
+  { key: 'lfoSyncMod', label: 'LFO Sync Modifier', group: 'Modulation', target: 'modulation', values: [0, 1, 2], min: 0, max: 2, step: 1, def: 0, display: 'stepMod' },
+  { key: 'lfoFold', label: 'LFO Fold', group: 'Modulation', target: 'modulation', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' },
+  { key: 'lfoAmount', label: 'LFO Amount', group: 'Modulation', target: 'modulation', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' },
+  // An index into MOD_TARGETS, where 0 is "not mapped". Stored as a number so it
+  // rides the normal snapshot path; `max` is written literally to keep this file
+  // import-free, and a test pins it to MOD_TARGETS.length - 1 so the two cannot drift.
+  { key: 'lfoTarget', label: 'LFO Target', group: 'Modulation', target: 'modulation', min: 0, max: 12, step: 1, def: 0 },
+
   // ---- Modal string voice -------------------------------------------------
   // Pluck position lives here, not under Modulation -- it is a property of *where*
   // the string is plucked, the same as decay or damping are properties of how it
