@@ -1,4 +1,5 @@
 import { lfoValue } from '../modulation/lfo.js';
+import { paletteFor } from './palette.js';
 
 /**
  * The LFO's scope: a static picture of one cycle of the current shape.
@@ -34,6 +35,8 @@ export class LfoView {
     this.fold = 0;
     this.cssWidth = 0;
     this.cssHeight = 0;
+    /** Page 0's colours until told otherwise -- see EuclidView for the reasoning. */
+    this.palette = paletteFor(0);
 
     // A ResizeObserver rather than only a window listener, because this canvas is
     // built inside its panel and cannot be measured until the panel is in the
@@ -71,6 +74,13 @@ export class LfoView {
     this.draw();
   }
 
+  /** Draw in a different page's colours -- see ui/palette.js. */
+  setPalette(palette) {
+    if (!palette) return;
+    this.palette = palette;
+    this.draw();
+  }
+
   /** Curve height at a phase, in CSS pixels from the top. */
   #yFor(phase) {
     const mid = this.cssHeight / 2;
@@ -90,7 +100,7 @@ export class LfoView {
     ctx.beginPath();
     ctx.moveTo(0, h / 2);
     ctx.lineTo(w, h / 2);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+    ctx.strokeStyle = this.palette.lfoZero;
     ctx.lineWidth = 1;
     ctx.stroke();
 
@@ -103,7 +113,7 @@ export class LfoView {
       if (x === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
-    ctx.strokeStyle = '#4a90b8';
+    ctx.strokeStyle = this.palette.lfoCurve;
     ctx.lineWidth = 1.5;
     ctx.stroke();
   }

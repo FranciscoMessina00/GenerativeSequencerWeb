@@ -4,7 +4,11 @@ import { lfoPeriod, lfoValue } from './lfo.js';
 import { modTargetKey } from './modTargets.js';
 
 /**
- * The one modulation source: an LFO, and the parameter it is pointed at.
+ * One track's modulation source: an LFO, and the parameter it is pointed at.
+ *
+ * There is one of these per track, each pointed at its own track's copy of
+ * whatever it targets -- which is why every modulatable param is per-track in the
+ * schema. Two tracks sweeping "stiffness" sweep two different strings.
  *
  * Two decisions shape everything here.
  *

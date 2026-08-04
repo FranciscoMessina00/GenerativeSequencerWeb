@@ -1,7 +1,7 @@
 import { EventBus } from './core/EventBus.js';
 import { Rng } from './core/rng.js';
 import { paramSpec } from './core/paramSchema.js';
-import { ParamStore } from './core/ParamStore.js';
+import { ParamStore, TRACK_COUNT } from './core/ParamStore.js';
 // Namespaced because toJSON has no button of its own -- it is how a new factory
 // patch gets authored, via the console handle at the bottom of this file.
 import * as presets from './core/presets.js';
@@ -18,7 +18,9 @@ import { LogicOpControl } from './ui/LogicOpControl.js';
 import { FillIconControl } from './ui/FillIconControl.js';
 import { TrigLoopControl } from './ui/TrigLoopControl.js';
 import { LfoPanel } from './ui/LfoPanel.js';
+import { TrackTabs } from './ui/TrackTabs.js';
 import { InfoBar } from './ui/InfoBar.js';
+import { applyPalette, paletteFor } from './ui/palette.js';
 import { Modulation } from './modulation/Modulation.js';
 import { MOD_TARGETS } from './modulation/modTargets.js';
 import { modSweepRange } from './modulation/modRange.js';
@@ -30,18 +32,32 @@ import { SCALES } from './sequencer/scales.js';
  * downstream talks over the bus.
  */
 
+/**
+ * Track 0's seed on a cold boot; the rest count up from it, so a fresh page is
+ * reproducible and the four tracks still differ. Any saved patch overrides all
+ * four -- see applySnapshot.
+ */
+const BASE_SEED = 424242;
+
 const bus = new EventBus();
-const rng = new Rng();
-const audio = new AudioEngine(bus);
+const audio = new AudioEngine(bus, { trackCount: TRACK_COUNT });
 
-// One channel for now. `tracks` is a list and every event carries its trackId, so
-// adding channels is additive.
-const tracks = [new Track(0, rng)];
+// One Rng per track, never one shared: the generators draw from it every step, so
+// a shared stream would couple four independent random walks into one.
+const rngs = Array.from({ length: TRACK_COUNT }, (_, i) => new Rng(BASE_SEED + i));
+const tracks = rngs.map((rng, i) => new Track(i, rng));
 
-// Which track the single on-screen control surface is bound to. A track selector
-// would make this a variable; until then it names the assumption instead of
-// scattering literal zeros through the wiring.
-const VISIBLE_TRACK = 0;
+// Which track the single on-screen control surface is bound to right now.
+//
+// One surface re-bound rather than four built and hidden: that keeps the DOM ids
+// unique, keeps one canvas per view, and keeps the setter maps below keyed by
+// param alone. selectTrack() is what moves it.
+//
+// Two mechanisms carry it into the controls, and both read it late rather than
+// copying it: widgets that own a trackId get setTrackId() called on them, and the
+// leaf controls (Dropdown, LogicOpControl, FillIconControl) emit through closures
+// defined here, which see whatever this holds at the moment of the gesture.
+let visibleTrack = 0;
 
 const scheduler = new Scheduler({
   bus,
@@ -53,6 +69,11 @@ const scheduler = new Scheduler({
 // routing closure can reference it without risking a temporal-dead-zone throw.
 /** @type {EuclidView | undefined} */
 let view;
+
+// Likewise: the step handler feeds the tab strip's progress bars, and the strip is
+// built after the controls it switches between.
+/** @type {import('./ui/TrackTabs.js').TrackTabs | undefined} */
+let tabs;
 
 // Named for what it explains rather than what it is, since that's the only
 // reason the ring's own routing closure below needs to touch it.
@@ -66,13 +87,16 @@ const legendRandomEl = document.getElementById('legend-random');
 // stay still. See modulation/Modulation.js.
 const writeToEngine = (key, value, trackId, spec) => {
   if (spec.target === 'track') tracks[trackId]?.setParam(key, value);
+  else if (spec.target === 'voice') audio.setVoiceParam(key, value, trackId);
   else if (spec.target === 'transport') scheduler.setParam(key, value);
-  else if (spec.target === 'voice') audio.setParam(key, value);
+  else if (spec.target === 'master') audio.setMasterParam(key, value);
 };
 
-// Assigned below, once the store exists for it to read base values from.
-/** @type {import('./modulation/Modulation.js').Modulation | undefined} */
-let modulation;
+// Assigned below, once the store exists for them to read base values from. One per
+// track: the LFO's own settings are per-track, and so is everything it can point
+// at, so two tracks sweeping the same param no longer fight over one value.
+/** @type {import('./modulation/Modulation.js').Modulation[]} */
+let modulations = [];
 
 // The one authoritative copy of every parameter. It owns writing to the engines and
 // announces each committed value as `param:changed`, which is what lets a preset or
@@ -82,13 +106,16 @@ const store = new ParamStore({
   trackCount: tracks.length,
   route: (key, value, trackId, spec) => {
     if (spec.target === 'modulation') {
-      // Not an engine: these configure the LFO itself.
-      modulation?.setParam(key, value);
+      // Not an engine: these configure one track's LFO.
+      modulations[trackId]?.setParam(key, value);
       return;
     }
     writeToEngine(key, value, trackId, spec);
 
-    if (spec.target === 'track') {
+    // The ring shows one track at a time, so only that track's changes are worth
+    // repainting for. Without this guard a hidden track's edit would redraw the
+    // visible ring with the wrong pattern.
+    if (spec.target === 'track' && trackId === visibleTrack) {
       // The ring is a picture of the Euclidean pattern, so refresh it when the
       // pattern parameters move.
       if (key === 'steps' || key === 'pulses' || key === 'rotation') {
@@ -113,14 +140,16 @@ const store = new ParamStore({
   },
 });
 
-// The LFO. It reads base values out of the store and writes modulated ones straight to
-// the engines, so the store keeps owning what the user actually set.
-modulation = new Modulation({
+// The LFOs, one per track. Each reads base values out of the store and writes
+// modulated ones straight to the engines, so the store keeps owning what the user
+// actually set. Each is advanced by its OWN track's steps below, so its phase rate
+// follows that track's step division rather than whichever tab happens to be open.
+modulations = tracks.map((track) => new Modulation({
   store,
   write: writeToEngine,
   getBarSeconds: () => scheduler.barDuration,
-  trackId: VISIBLE_TRACK,
-});
+  trackId: track.trackId,
+}));
 
 // The parameters that define the Euclidean pattern live inside the ring, since they are
 // what the ring is a picture of. Division joins them because it sets how fast the playhead
@@ -132,11 +161,16 @@ const hubEl = document.getElementById('hub');
 const ui = new UIController({ bus });
 ui.renderDragNumbers(hubEl, EUCLID_KEYS);
 
+// The two global params, in the header beside Play. Same widget the hub uses -- a
+// tempo and an output level are magnitudes you nudge, not settings you pick.
+const TRANSPORT_KEYS = ['bpm', 'masterGain'];
+ui.renderDragNumbers(document.getElementById('transport-nums'), TRANSPORT_KEYS);
+
 // Division is a drag-number plus two letter toggles, so it is built here rather than by
 // renderDragNumbers, and appended as the grid's fourth cell.
 const stepDivisionControl = new StepDivisionControl({
   bus,
-  trackId: VISIBLE_TRACK,
+  trackId: visibleTrack,
   divisionSpec: paramSpec('stepDivision'),
   modSpec: paramSpec('stepMod'),
 });
@@ -150,17 +184,17 @@ const TRIG_KEYS = ['logicOp', 'probability', 'trigLoop', 'trigLoopLength', 'trig
 
 const logicOpControl = new LogicOpControl({
   spec: paramSpec('logicOp'),
-  onInput: (value) => bus.emit('param:change', { trackId: VISIBLE_TRACK, key: 'logicOp', value }),
+  onInput: (value) => bus.emit('param:change', { trackId: visibleTrack, key: 'logicOp', value }),
 });
 const probabilityControl = new FillIconControl({
   spec: paramSpec('probability'),
   buildIcon: diceIcon,
   label: 'Prob',
-  onInput: (value) => bus.emit('param:change', { trackId: VISIBLE_TRACK, key: 'probability', value }),
+  onInput: (value) => bus.emit('param:change', { trackId: visibleTrack, key: 'probability', value }),
 });
 const trigLoopControl = new TrigLoopControl({
   bus,
-  trackId: VISIBLE_TRACK,
+  trackId: visibleTrack,
   enabledSpec: paramSpec('trigLoop'),
   lengthSpec: paramSpec('trigLoopLength'),
   permSpec: paramSpec('trigPerm'),
@@ -190,7 +224,7 @@ const biasSpreadSliders = {};
 for (const [group, axes] of Object.entries(BIAS_SPREAD_AXES)) {
   const slider = new BiasSpreadSlider({
     bus,
-    trackId: VISIBLE_TRACK,
+    trackId: visibleTrack,
     biasSpec: paramSpec(axes.bias),
     spreadSpec: paramSpec(axes.spread),
     title: axes.title,
@@ -204,7 +238,7 @@ const sliderSkipKeys = Object.values(BIAS_SPREAD_AXES).flatMap((a) => [a.bias, a
 // capture, length, and (where the schema has one) reorder. See TrigLoopControl.js.
 const noteLoopControl = new TrigLoopControl({
   bus,
-  trackId: VISIBLE_TRACK,
+  trackId: visibleTrack,
   enabledSpec: paramSpec('noteLoop'),
   lengthSpec: paramSpec('noteLoopLength'),
   permSpec: paramSpec('notePerm'),
@@ -213,7 +247,7 @@ const noteLoopControl = new TrigLoopControl({
 // TrigLoopControl omits the permutation glyph whenever permSpec isn't passed.
 const velLoopControl = new TrigLoopControl({
   bus,
-  trackId: VISIBLE_TRACK,
+  trackId: visibleTrack,
   enabledSpec: paramSpec('velLoop'),
   lengthSpec: paramSpec('velLoopLength'),
 });
@@ -225,11 +259,11 @@ const VEL_LOOP_KEYS = ['velLoop', 'velLoopLength'];
 const scaleDropdown = new Dropdown({
   spec: paramSpec('scale'),
   options: SCALES.map((s) => ({ value: s.id, label: s.name })),
-  onInput: (value) => bus.emit('param:change', { trackId: VISIBLE_TRACK, key: 'scale', value }),
+  onInput: (value) => bus.emit('param:change', { trackId: visibleTrack, key: 'scale', value }),
 });
 const glideControl = new GlideControl({
   bus,
-  trackId: VISIBLE_TRACK,
+  trackId: visibleTrack,
   amountSpec: paramSpec('glideAmount'),
   modeSpec: paramSpec('glideMode'),
 });
@@ -254,7 +288,7 @@ const LFO_KEYS = [
 ];
 const lfoPanel = new LfoPanel({
   bus,
-  trackId: VISIBLE_TRACK,
+  trackId: visibleTrack,
   shapeSpec: paramSpec('lfoShape'),
   rateSpec: paramSpec('lfoRate'),
   syncSpec: paramSpec('lfoSync'),
@@ -269,7 +303,10 @@ sliderPrepend.Modulation = lfoPanel.element;
 
 // Group order and membership no longer track PARAM_GROUPS: the order here is the
 // on-screen order, which the schema's own ordering has no reason to dictate.
-const CONTROL_GROUPS = ['Pitch', 'Velocity', 'Modulation', 'String', 'Granulator', 'Transport'];
+//
+// Transport is absent because its two params moved to the header, and Mixer because
+// its two are drawn on the tab strip -- so neither group renders as sliders here.
+const CONTROL_GROUPS = ['Pitch', 'Velocity', 'Modulation', 'String', 'Granulator'];
 
 ui.renderGroups(
   document.getElementById('controls'),
@@ -300,8 +337,8 @@ view = new EuclidView(
     hubEl.classList.toggle('hub--tight', side < 150);
   },
 );
-view.setPattern(tracks[VISIBLE_TRACK].getPattern());
-view.setLoopActive(tracks[VISIBLE_TRACK].params.trigLoop);
+view.setPattern(tracks[visibleTrack].getPattern());
+view.setLoopActive(tracks[visibleTrack].params.trigLoop);
 
 // ---------------------------------------------------------------------------
 // Wiring
@@ -342,6 +379,67 @@ registerLeaf(scaleDropdown);
 registerLeaf(logicOpControl);
 registerLeaf(probabilityControl);
 
+/** Every widget that owns a trackId, so selectTrack can re-point all of them. */
+const trackBoundWidgets = [
+  ui, glideControl, stepDivisionControl, trigLoopControl,
+  noteLoopControl, velLoopControl, lfoPanel,
+  ...Object.values(biasSpreadSliders),
+];
+
+// The ring's stepIndex from the step *before* this one, so a wrap (a new
+// revolution starting) can be detected once and the loop's whole next revolution
+// projected in a single shot, rather than the ring updating one position at a time
+// as the playhead happens to pass each one.
+//
+// It tracks the visible track only. Letting every track write to it would make a
+// "wrap" mean "some other track's index happened to be lower", which fires the
+// projection at the wrong moments and misses the real ones.
+let lastRingStepIndex = -1;
+
+/**
+ * Show a different track.
+ *
+ * The controls are re-pointed and then filled from the store directly rather than
+ * over the bus: `param:changed` would send every value back through routing to the
+ * engines, which is both pointless (they already hold these values) and wrong for
+ * anything the LFO is currently driving, since routing would overwrite the
+ * modulated value with the base one.
+ */
+function selectTrack(next) {
+  if (next === visibleTrack || !tracks[next]) return;
+  visibleTrack = next;
+
+  for (const widget of trackBoundWidgets) widget.setTrackId(next);
+  for (const [key, value] of Object.entries(store.trackValues[next])) {
+    controlSetters.get(key)?.(value);
+  }
+
+  const track = tracks[next];
+  view.setPattern(track.getPattern());
+  view.setLoopActive(track.params.trigLoop);
+  // The marks the ring holds describe the track it was showing a moment ago.
+  view.clearPlayhead();
+  lastRingStepIndex = -1;
+  legendRandomEl.hidden = !track.params.trigLoop;
+  if (track.params.trigLoop) {
+    view.setLoopSnapshot(track.getTrigLoopWindow(track.getPattern().length));
+  }
+
+  // Assign mode is a question about one track's LFO, so it cannot survive the
+  // track changing underneath it.
+  setAssignMode(false);
+  renderModRange();
+  ui.clearReadout();
+
+  // The page's colours. One assignment retints the whole stylesheet; the canvases
+  // are handed the derived object, since reading custom properties back out in a
+  // draw loop would force layout on every frame.
+  const palette = applyPalette(next);
+  view.setPalette(palette);
+  lfoPanel.view.setPalette(palette);
+  tabs?.setActive(next);
+}
+
 // A control's gesture is only a *request*; the store decides what actually happens.
 bus.on('param:change', ({ trackId, key, value }) => {
   store.set(key, value, trackId);
@@ -351,29 +449,34 @@ bus.on('param:change', ({ trackId, key, value }) => {
 // change lands as an idempotent redraw, because setValue never re-emits and the
 // store already dropped the value if nothing changed.
 bus.on('param:changed', ({ trackId, key, value, global }) => {
-  if (!global && trackId !== VISIBLE_TRACK) return;
+  if (!global && trackId !== visibleTrack) return;
   controlSetters.get(key)?.(value);
 });
 
-// The ring's stepIndex from the step *before* this one, so a wrap (a new
-// revolution starting) can be detected here once and the loop's whole next
-// revolution projected in a single shot, rather than the ring updating one
-// position at a time as the playhead happens to pass each one.
-let lastRingStepIndex = -1;
-
 bus.on('step', (step) => {
+  // Every track sounds, on its own chain -- the engine dispatches on step.trackId.
   audio.noteOn(step);
-  const wrapped = step.trackId === VISIBLE_TRACK && step.stepIndex < lastRingStepIndex;
-  lastRingStepIndex = step.stepIndex;
-  view.enqueue(
-    step,
-    wrapped ? tracks[VISIBLE_TRACK].getTrigLoopWindow(tracks[VISIBLE_TRACK].getPattern().length) : undefined,
-  );
-  ui.pushStep(step);
-  // Sampled here rather than on an animation frame: this path runs off the
-  // scheduler's Worker timer, so it keeps modulating in a hidden tab where a
-  // requestAnimationFrame loop would stall while the sequence played on.
-  if (step.trackId === VISIBLE_TRACK) modulation.onStep(step);
+
+  // The ring and the readout show one track, so only that track's steps reach them.
+  if (step.trackId === visibleTrack) {
+    const wrapped = step.stepIndex < lastRingStepIndex;
+    lastRingStepIndex = step.stepIndex;
+    const track = tracks[visibleTrack];
+    view.enqueue(
+      step,
+      wrapped ? track.getTrigLoopWindow(track.getPattern().length) : undefined,
+    );
+    ui.pushStep(step);
+  }
+
+  // Every track's tab shows its own progress, so every track's steps go here.
+  tabs?.enqueue(step, tracks[step.trackId].getPattern().length);
+
+  // Each LFO is advanced by its own track: sampled here rather than on an
+  // animation frame because this path runs off the scheduler's Worker timer, so it
+  // keeps modulating in a hidden browser tab where a requestAnimationFrame loop
+  // would stall while the sequence played on.
+  modulations[step.trackId]?.onStep(step);
 });
 
 // ---------------------------------------------------------------------------
@@ -430,12 +533,12 @@ let modRangeKey = null;
  * modulation/modRange.js).
  */
 function renderModRange() {
-  const key = MOD_TARGETS[store.get('lfoTarget', VISIBLE_TRACK)] ?? null;
+  const key = MOD_TARGETS[store.get('lfoTarget', visibleTrack)] ?? null;
   if (modRangeKey && modRangeKey !== key) modRangeSetters.get(modRangeKey)?.(null);
   modRangeKey = key;
   if (!key) return;
-  const amount = store.get('lfoAmount', VISIBLE_TRACK);
-  const base = Number(store.get(key, VISIBLE_TRACK));
+  const amount = store.get('lfoAmount', visibleTrack);
+  const base = Number(store.get(key, visibleTrack));
   modRangeSetters.get(key)?.(modSweepRange(key, base, amount));
 }
 
@@ -449,7 +552,7 @@ document.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   e.stopPropagation();
   bus.emit('param:change', {
-    trackId: VISIBLE_TRACK,
+    trackId: visibleTrack,
     key: 'lfoTarget',
     value: MOD_TARGETS.indexOf(key),
   });
@@ -460,7 +563,11 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && assigning) setAssignMode(false);
 });
 
-bus.on('param:changed', ({ key }) => {
+// Only the visible track's sweep is on screen, so a hidden track's LFO moving is
+// not worth a redraw -- and every one of these keys is per-track now, so the
+// trackId is never the global 0 stand-in.
+bus.on('param:changed', ({ trackId, key }) => {
+  if (trackId !== visibleTrack) return;
   if (key === 'lfoTarget' || key === 'lfoAmount' || key === modRangeKey) renderModRange();
 });
 
@@ -505,14 +612,17 @@ const statusEl = document.getElementById('status');
 
 bus.on('transport:change', ({ running }) => {
   view.setRunning(running);
-  // Resets the LFO's phase on start, so a synced one is locked to the bar; on stop it
-  // hands the parameter it was driving back to the value the store holds.
-  modulation.setRunning(running);
+  tabs?.setRunning(running);
+  // Resets each LFO's phase on start, so a synced one is locked to the bar; on stop
+  // each hands the parameter it was driving back to the value the store holds. All
+  // four, not just the visible one -- an unattended LFO would otherwise leave its
+  // target stuck at whatever it happened to be sweeping.
+  for (const modulation of modulations) modulation.setRunning(running);
   playButton.textContent = running ? 'Stop' : 'Play';
   playButton.classList.toggle('active', running);
   if (!running) {
-    // Cut the ringing voices rather than letting up to 16 modal tails hang for
-    // seconds after the transport stops.
+    // Cut the ringing voices rather than letting modal tails hang for seconds
+    // after the transport stops -- every track has its own pool.
     audio.panic();
     ui.clearReadout();
   }
@@ -540,16 +650,21 @@ playButton.addEventListener('click', async () => {
 });
 
 // A single note on demand, for checking the voice without running the sequence.
+// The visible track's, since that is the one whose controls are on screen -- and it
+// sounds through that track's own chain, so a muted track plucks silently.
 document.getElementById('pluck').addEventListener('click', async () => {
   await ensureAudio();
-  const step = tracks[VISIBLE_TRACK].step(scheduler.stepDurationFor(VISIBLE_TRACK));
+  const step = tracks[visibleTrack].step(scheduler.stepDurationFor(visibleTrack));
   audio.noteOn({ ...step, triggered: true, audioTime: audio.currentTime + 0.02 });
   ui.pushStep({ ...step, triggered: true });
 });
 
+// Every track, not just the visible one: the button sits in the global transport
+// next to Play, so it means "shuffle the whole instrument". The status names the
+// visible track's new seed, since one line cannot show four.
 document.getElementById('reseed').addEventListener('click', () => {
-  rng.setSeed((Math.random() * 0x7fffffff) | 0);
-  statusEl.textContent = `reseeded (${rng.seed})`;
+  for (const rng of rngs) rng.setSeed((Math.random() * 0x7fffffff) | 0);
+  statusEl.textContent = `reseeded (${rngs[visibleTrack].seed})`;
 });
 
 window.addEventListener('keydown', (e) => {
@@ -583,16 +698,24 @@ function say(message) {
 }
 
 /**
- * Apply a patch, restoring its seed too.
+ * Apply a patch, restoring its seeds too.
  *
  * Order matters: reseed before the ring is refreshed, so what the display shows and
- * what the generators will produce come from the same seed.
+ * what the generators will produce come from the same seeds.
+ *
+ * A version-1 patch carries one seed for its one track; the tracks it says nothing
+ * about keep the seed they had, since the store has already reset their params and
+ * a fresh seed would add a second unrelated change.
  */
 function applySnapshot(snapshot) {
-  const seed = store.load(snapshot);
-  if (seed !== undefined) rng.setSeed(seed);
-  view.setPattern(tracks[VISIBLE_TRACK].getPattern());
-  return seed;
+  const seeds = store.load(snapshot);
+  seeds?.forEach((seed, trackId) => {
+    if (typeof seed === 'number') rngs[trackId]?.setSeed(seed);
+  });
+  view.setPattern(tracks[visibleTrack].getPattern());
+  view.setLoopActive(tracks[visibleTrack].params.trigLoop);
+  view.clearPlayhead();
+  return seeds;
 }
 
 function fillSlots(names) {
@@ -645,15 +768,52 @@ presets.loadFactoryPresets().then((list) => {
   fillSlots([...factory.keys()]);
 });
 
+// ---------------------------------------------------------------------------
+// Track pages
+// ---------------------------------------------------------------------------
+
+// Built last, because switching pages reaches everything above it. The strip owns
+// mute and level for all four tracks at once, so unlike every other widget it is
+// fed every track's changes rather than only the visible one's.
+tabs = new TrackTabs({
+  bus,
+  trackCount: tracks.length,
+  muteSpec: paramSpec('mute'),
+  levelSpec: paramSpec('level'),
+  getAudioTime: () => audio.currentTime,
+  onSelect: (trackId) => selectTrack(trackId),
+  active: visibleTrack,
+});
+document.getElementById('tabs-row').appendChild(tabs.element);
+
+bus.on('param:changed', ({ trackId, key, value }) => {
+  tabs.setValue(key, value, trackId);
+});
+
+// The starting page's colours. selectTrack does this on every later switch, but it
+// returns early for the page already showing, so the first one happens here.
+const bootPalette = applyPalette(visibleTrack);
+view.setPalette(bootPalette);
+lfoPanel.view.setPalette(bootPalette);
+
+// Track 0 is the one you hear on a cold boot. Every track defaults to muted (see
+// paramSchema.js) precisely so this is an explicit decision made in one place,
+// rather than four identical Euclid patterns stacking up on first load. Emitted
+// after the strip exists, so its dot lights.
+store.set('mute', false, 0);
+
 // Console handle. Module bindings are not reachable from the devtools console, and
 // poking a generative instrument by hand is genuinely useful:
 //
-//   __seq.store.set('bpm', 90)     moves the fader and the clock together
+//   __seq.store.set('bpm', 90)          moves the fader and the clock together
+//   __seq.store.set('steps', 9, 2)      edits track 3 without switching to it
+//   __seq.selectTrack(1)                switches page, exactly as the tab does
 //
 // It is also how a new factory patch is authored -- dial the instrument in, then
 // paste the output into presets/factory.json as another entry:
 //
-//   __seq.presets.toJSON(__seq.store.snapshot(__seq.rng.seed))
+//   __seq.presets.toJSON(__seq.store.snapshot(__seq.rngs.map((r) => r.seed)))
 /** @type {any} */ (window).__seq = {
-  bus, store, tracks, rng, audio, scheduler, presets, applySnapshot, modulation,
+  bus, store, tracks, rngs, audio, scheduler, presets, applySnapshot, modulations,
+  selectTrack, tabs, paletteFor, get visibleTrack() { return visibleTrack; },
 };

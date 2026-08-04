@@ -82,9 +82,13 @@ export const INFO_TEXT = {
   grainPitch: 'Grain Pitch — playback rate of the granular layer. 1 is the original pitch.',
   grainDryWet: 'Grain Dry/Wet — balance between the plain string and its granular echo.',
 
-  // ---- Transport ----------------------------------------------------------
-  bpm: 'BPM — tempo, in beats per minute.',
-  masterGain: 'Master — output level for the whole instrument.',
+  // ---- Mixer: per-track, drawn on the tab strip ----------------------------
+  mute: 'Mute — silences this track without stopping it. New tracks start muted.',
+  level: 'Level — how loud this track sits in the mix of all four.',
+
+  // ---- Transport: global, shared by every track ----------------------------
+  bpm: 'BPM — tempo, in beats per minute. Every track runs off this one clock.',
+  masterGain: 'Master — output level for the whole instrument, after all four tracks.',
 
   // ---- Controls with no parameter behind them ------------------------------
   // The bias/spread axis-lock toggle: a view preference, deliberately not a schema
@@ -95,6 +99,9 @@ export const INFO_TEXT = {
   lfoScope: 'LFO Scope — one cycle of the current shape, after folding.',
   lfoMap: 'Map — press, then click any highlighted control to point the LFO at it. Escape cancels.',
   lfoClear: 'Clear — unmaps the LFO from whatever it is currently pointed at.',
+  // A track tab. The mute dot and level number inside it carry their own param keys,
+  // so this describes only the tab itself.
+  trackTab: 'Track Page — click to bring this track\'s controls on screen. The bar shows how far through its sequence it is.',
   // Fallbacks for the generated `<key>.min` / `<key>.max` range-edge drag-numbers.
   'range.min': 'Range Low — the lowest value this slider can reach. Drag to change it.',
   'range.max': 'Range High — the highest value this slider can reach. Drag to change it.',

@@ -19,16 +19,30 @@ import { PARAM_SCHEMA, normalizeParam, paramSpec } from './paramSchema.js';
  * and applying it calls setValue(), which by contract updates the display without
  * re-emitting. The echo is an idempotent redraw, never a loop.
  *
- * `target` decides scope. 'track' params are per-track, because two tracks want
- * different rhythms. 'voice' and 'transport' are global, matching the single
- * AudioEngine and Scheduler they drive.
+ * `scope` decides how many copies of a value exist, and it is deliberately NOT
+ * `target`: a param's consumer and its multiplicity are different questions. Only
+ * `scope: 'global'` params are single-valued (the tempo and the master fader);
+ * everything else is per-track, because four pages want four rhythms, four
+ * timbres and four LFOs.
  */
 
-/** Bumped only if the snapshot *shape* changes; adding params does not need it. */
-export const SNAPSHOT_VERSION = 1;
+/**
+ * Bumped only if the snapshot *shape* changes; adding params does not need it.
+ *
+ * 2: `seed` became `seeds`, one per track, since each track's generators need
+ *    their own stream -- a shared Rng would couple their random walks.
+ */
+export const SNAPSHOT_VERSION = 2;
 
-const TRACK_KEYS = PARAM_SCHEMA.filter((p) => p.target === 'track').map((p) => p.key);
-const GLOBAL_KEYS = PARAM_SCHEMA.filter((p) => p.target !== 'track').map((p) => p.key);
+/**
+ * How many tracks the instrument runs -- one page of controls each, see
+ * ui/TrackTabs.js. Not a ParamStore default: tests construct smaller stores
+ * deliberately, and this is the app's number rather than the class's.
+ */
+export const TRACK_COUNT = 4;
+
+const TRACK_KEYS = PARAM_SCHEMA.filter((p) => p.scope !== 'global').map((p) => p.key);
+const GLOBAL_KEYS = PARAM_SCHEMA.filter((p) => p.scope === 'global').map((p) => p.key);
 
 function defaultsForKeys(keys) {
   const out = {};
@@ -59,7 +73,7 @@ export class ParamStore {
   #bagFor(key, trackId) {
     const spec = paramSpec(key);
     if (!spec) return null;
-    if (spec.target !== 'track') return this.globalValues;
+    if (spec.scope === 'global') return this.globalValues;
     return this.trackValues[trackId] ?? null;
   }
 
@@ -105,35 +119,47 @@ export class ParamStore {
       trackId,
       key,
       value,
-      global: spec.target !== 'track',
+      global: spec.scope === 'global',
     });
   }
 
   /**
    * A complete, serialisable description of the instrument's state.
    *
-   * The seed is part of the patch, not incidental: the generators are stochastic,
-   * so without it a restored snapshot reproduces the same *settings* but a
-   * different performance. With it the patch is genuinely reproducible, which is
-   * the whole reason the RNG is seedable.
+   * The seeds are part of the patch, not incidental: the generators are
+   * stochastic, so without them a restored snapshot reproduces the same
+   * *settings* but a different performance. With them the patch is genuinely
+   * reproducible, which is the whole reason the RNGs are seedable.
+   *
+   * One seed per track, because each track owns its own Rng -- sharing one would
+   * couple their random walks.
+   *
+   * @param {number[]} [seeds] one per track, in track order
    */
-  snapshot(seed) {
+  snapshot(seeds = []) {
     return {
       version: SNAPSHOT_VERSION,
-      seed,
+      seeds: this.trackValues.map((_, trackId) => seeds[trackId]),
       global: { ...this.globalValues },
       tracks: this.trackValues.map((bag) => ({ ...bag })),
     };
   }
 
   /**
-   * Apply a snapshot. Returns the seed it carried, if any, so the caller can
-   * decide whether to restore it (the store does not own the RNG).
+   * Apply a snapshot. Returns the seeds it carried, one per track, so the caller
+   * can decide whether to restore them (the store does not own the RNGs).
    *
-   * Unknown keys are ignored rather than rejected, and missing ones keep their
-   * current value, so a snapshot saved before a schema change still loads. Every
-   * value goes through the same normalisation as a live edit, so a hand-edited
-   * file cannot push the engine outside its declared ranges.
+   * Unknown keys are ignored rather than rejected, and a key missing from a bag
+   * that IS present keeps its current value, so a snapshot saved before a schema
+   * change still loads. Every value goes through the same normalisation as a live
+   * edit, so a hand-edited file cannot push the engine outside its declared
+   * ranges.
+   *
+   * A track the snapshot says nothing about is reset to defaults rather than left
+   * alone, so a patch fully determines what you hear -- otherwise loading a
+   * one-track patch would leave three tracks playing whatever was last dialled in.
+   * That is only safe because `mute` defaults to true: an unmentioned track goes
+   * quiet rather than joining in.
    *
    * Writes are silent, then a single syncAll() announces everything -- otherwise
    * params that happen to already match would never reach the controls, since
@@ -143,18 +169,37 @@ export class ParamStore {
     if (!snapshot || typeof snapshot !== 'object') return undefined;
 
     for (const [key, value] of Object.entries(snapshot.global ?? {})) {
-      if (paramSpec(key)?.target !== 'track') this.set(key, value, 0, { silent: true });
+      if (paramSpec(key)?.scope === 'global') this.set(key, value, 0, { silent: true });
     }
 
-    (Array.isArray(snapshot.tracks) ? snapshot.tracks : []).forEach((bag, trackId) => {
-      if (trackId >= this.trackCount || !bag) return;
+    const bags = Array.isArray(snapshot.tracks) ? snapshot.tracks : [];
+    this.trackValues.forEach((_, trackId) => {
+      const bag = bags[trackId];
+      if (!bag) {
+        this.trackValues[trackId] = defaultsForKeys(TRACK_KEYS);
+        return;
+      }
       for (const [key, value] of Object.entries(bag)) {
-        if (paramSpec(key)?.target === 'track') this.set(key, value, trackId, { silent: true });
+        if (paramSpec(key)?.scope !== 'global') this.set(key, value, trackId, { silent: true });
       }
     });
 
     this.syncAll();
-    return typeof snapshot.seed === 'number' ? snapshot.seed : undefined;
+    return this.#seedsFrom(snapshot);
+  }
+
+  /**
+   * The seeds a snapshot carries, one per track.
+   *
+   * Version 1 held a single scalar `seed` alongside a single track, so it becomes
+   * that track's seed and the rest are left for the caller to leave alone.
+   */
+  #seedsFrom(snapshot) {
+    if (Array.isArray(snapshot.seeds)) {
+      return snapshot.seeds.map((s) => (typeof s === 'number' ? s : undefined));
+    }
+    if (typeof snapshot.seed === 'number') return [snapshot.seed];
+    return undefined;
   }
 
   /**

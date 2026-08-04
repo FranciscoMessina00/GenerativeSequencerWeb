@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/EventBus.js';
 import { Rng } from '../src/core/rng.js';
-import { ParamStore, SNAPSHOT_VERSION } from '../src/core/ParamStore.js';
+import { ParamStore, SNAPSHOT_VERSION, TRACK_COUNT } from '../src/core/ParamStore.js';
 import { paramSpec } from '../src/core/paramSchema.js';
 import { Track } from '../src/sequencer/Track.js';
 import { readFileSync } from 'node:fs';
@@ -24,22 +24,43 @@ function harness({ trackCount = 1 } = {}) {
   return { bus, store, announced };
 }
 
-test('a snapshot carries the version, the seed, and every scope', () => {
+test('a snapshot carries the version, one seed per track, and every scope', () => {
   const { store } = harness({ trackCount: 2 });
   store.set('steps', 12, 0);
   store.set('bpm', 145);
 
-  const snap = store.snapshot(4242);
+  const snap = store.snapshot([4242, 99]);
   assert.equal(snap.version, SNAPSHOT_VERSION);
-  assert.equal(snap.seed, 4242);
+  assert.deepEqual(snap.seeds, [4242, 99]);
   assert.equal(snap.global.bpm, 145);
   assert.equal(snap.tracks.length, 2);
   assert.equal(snap.tracks[0].steps, 12);
 });
 
+test('the seeds array is always one per track, however many were handed in', () => {
+  const { store } = harness({ trackCount: 3 });
+  // Short: the missing tails are undefined rather than absent, so the array's
+  // length always names the track it belongs to.
+  assert.deepEqual(store.snapshot([7]).seeds, [7, undefined, undefined]);
+  // Long: extras are dropped rather than describing tracks that do not exist.
+  assert.deepEqual(store.snapshot([1, 2, 3, 4, 5]).seeds, [1, 2, 3]);
+  assert.deepEqual(store.snapshot().seeds, [undefined, undefined, undefined]);
+});
+
+test('only bpm and masterGain are global; everything else is per-track', () => {
+  // The scope cut this whole feature rests on. If a param drifts out of the
+  // per-track bag, four pages silently start sharing it.
+  const { store } = harness();
+  assert.deepEqual(Object.keys(store.globalValues).sort(), ['bpm', 'masterGain']);
+  for (const key of ['lfoShape', 'lfoAmount', 'stiffness', 'grainDryWet', 'mute', 'level']) {
+    assert.ok(key in store.trackValues[0], `${key} must be per-track`);
+    assert.ok(!(key in store.globalValues), `${key} must not be global`);
+  }
+});
+
 test('a snapshot is a copy, not a live view of the store', () => {
   const { store } = harness();
-  const snap = store.snapshot(1);
+  const snap = store.snapshot([1]);
   store.set('bpm', 200);
   assert.notEqual(snap.global.bpm, 200, 'mutating the store must not rewrite history');
 });
@@ -52,14 +73,14 @@ test('snapshot -> load round-trips through JSON', () => {
   store.set('bpm', 99);
   store.set('scale', 5, 0);
   store.set('trigLoop', true, 0);
-  const before = store.snapshot(777);
+  const before = store.snapshot([777, 778]);
 
   // A fresh store, as if the page had just been reloaded.
   const { store: restored } = harness({ trackCount: 2 });
-  const seed = restored.load(fromJSON(toJSON(before)));
+  const seeds = restored.load(fromJSON(toJSON(before)));
 
-  assert.equal(seed, 777);
-  assert.deepEqual(restored.snapshot(777), before);
+  assert.deepEqual(seeds, [777, 778]);
+  assert.deepEqual(restored.snapshot([777, 778]), before);
   assert.equal(restored.get('steps', 1), 13);
   assert.equal(restored.get('trigLoop', 0), true);
 });
@@ -74,7 +95,7 @@ test('loading announces every param, so the whole UI can follow', () => {
   const target = new ParamStore({ bus: bus2, trackCount: 1 });
   bus2.on('param:changed', (e) => announced.push(e));
 
-  target.load(source.store.snapshot(5));
+  target.load(source.store.snapshot([5]));
 
   const trackKeyCount = Object.keys(target.trackValues[0]).length;
   const globalKeyCount = Object.keys(target.globalValues).length;
@@ -87,20 +108,43 @@ test('loading announces every param, so the whole UI can follow', () => {
 test('unknown keys are ignored and missing ones keep their current value', () => {
   const { store } = harness();
   store.set('bpm', 111);
+  store.set('pulses', 9, 0);
 
-  const seed = store.load({
+  const seeds = store.load({
     version: 1,
     seed: 8,
     global: { bpm: 123, somethingRemovedLater: 42 },
     tracks: [{ steps: 5, alsoGone: 'x' }],
   });
 
-  assert.equal(seed, 8);
+  // A version-1 patch held one scalar seed for its one track.
+  assert.deepEqual(seeds, [8]);
   assert.equal(store.get('bpm'), 123);
   assert.equal(store.get('steps'), 5);
-  // Not present in the snapshot, so it must survive untouched.
-  assert.equal(store.get('pulses'), paramSpec('pulses').def);
+  // Absent from a bag that IS present, so it survives untouched -- unlike a whole
+  // missing bag, which resets. See the next test.
+  assert.equal(store.get('pulses'), 9);
   assert.equal(store.get('somethingRemovedLater'), undefined);
+});
+
+test('a track the snapshot says nothing about is reset, not left playing', () => {
+  // Otherwise loading a one-track patch would leave three tracks sounding
+  // whatever was last dialled in, and the patch would not describe what you hear.
+  const { store } = harness({ trackCount: 3 });
+  for (const t of [0, 1, 2]) {
+    store.set('steps', 7, t);
+    store.set('mute', false, t);
+  }
+
+  store.load({ version: 2, seeds: [1], global: {}, tracks: [{ steps: 5 }] });
+
+  assert.equal(store.get('steps', 0), 5, 'the mentioned track takes the patch');
+  for (const t of [1, 2]) {
+    assert.equal(store.get('steps', t), paramSpec('steps').def, `track ${t} reset`);
+    // The reset is only safe because silence is the default -- an unmentioned
+    // track must not come back audible.
+    assert.equal(store.get('mute', t), true, `track ${t} went quiet`);
+  }
 });
 
 test('out-of-range and between-step values in a snapshot are normalised', () => {
@@ -130,15 +174,13 @@ test('malformed input is refused rather than thrown on', () => {
 });
 
 test('a restored patch reproduces the identical step sequence', () => {
-  // The point of storing the seed: same settings AND same performance.
-  const play = (snapshot) => {
-    const seed = snapshot.seed;
-    const rng = new Rng(seed);
-    const track = new Track(0, rng);
+  // The point of storing the seeds: same settings AND same performance.
+  const play = (snapshot, trackId = 0) => {
+    const track = new Track(trackId, new Rng(snapshot.seeds[trackId]));
     const store = new ParamStore({
-      trackCount: 1,
-      route: (key, value, trackId, spec) => {
-        if (spec.target === 'track') track.setParam(key, value);
+      trackCount: snapshot.tracks.length,
+      route: (key, value, id, spec) => {
+        if (spec.target === 'track' && id === trackId) track.setParam(key, value);
       },
     });
     store.load(snapshot);
@@ -148,17 +190,23 @@ test('a restored patch reproduces the identical step sequence', () => {
     }).join(',');
   };
 
-  const authoring = new ParamStore({ trackCount: 1 });
-  authoring.set('steps', 16, 0);
-  authoring.set('pulses', 7, 0);
-  authoring.set('probability', 0.4, 0);
-  authoring.set('noteSpread', 9, 0);
-  const patch = authoring.snapshot(20240731);
+  const authoring = new ParamStore({ trackCount: 2 });
+  for (const t of [0, 1]) {
+    authoring.set('steps', 16, t);
+    authoring.set('pulses', 7, t);
+    authoring.set('probability', 0.4, t);
+    authoring.set('noteSpread', 9, t);
+  }
+  const patch = authoring.snapshot([20240731, 20240732]);
 
   assert.equal(play(patch), play(patch), 'same patch must perform identically');
 
-  const other = { ...patch, seed: patch.seed + 1 };
+  const other = { ...patch, seeds: [patch.seeds[0] + 1, patch.seeds[1]] };
   assert.notEqual(play(patch), play(other), 'a different seed must perform differently');
+
+  // Identical settings, different seeds: two tracks of the same patch must not
+  // play in lockstep, which is the whole reason each one owns its own Rng.
+  assert.notEqual(play(patch, 0), play(patch, 1), 'per-track seeds must decouple the tracks');
 });
 
 // ---------------------------------------------------------------------------
@@ -179,29 +227,39 @@ test('the shipped Default patch has not drifted from the schema defaults', () =>
   // paramSchema.js without regenerating, this is what says so.
   const shipped = validateFactoryPresets(readFactory()).find((p) => p.name === 'Default');
   assert.ok(shipped, 'a patch named "Default" must ship');
-  assert.equal(typeof shipped.patch.seed, 'number', 'a factory patch needs a fixed seed');
+  assert.equal(shipped.patch.tracks.length, TRACK_COUNT, 'one bag per track, or tracks go stale');
+  assert.equal(shipped.patch.seeds.length, TRACK_COUNT, 'one seed per track');
+  for (const seed of shipped.patch.seeds) {
+    assert.equal(typeof seed, 'number', 'a factory patch needs fixed seeds');
+  }
 
-  const defaults = new ParamStore({ trackCount: 1 }).snapshot(shipped.patch.seed);
+  // Defaults, with the one deliberate exception: track 0 is audible. A patch whose
+  // every track was muted would load as silence, since `mute` defaults to true.
+  const defaults = new ParamStore({ trackCount: TRACK_COUNT });
+  defaults.set('mute', false, 0);
   assert.deepEqual(
     shipped.patch,
-    defaults,
+    defaults.snapshot(shipped.patch.seeds),
     'presets/factory.json no longer matches the schema defaults -- regenerate it',
   );
 });
 
 test('loading the shipped Default patch returns the instrument to its defaults', () => {
-  const { store } = harness();
+  const { store } = harness({ trackCount: TRACK_COUNT });
   store.set('bpm', 210);
   store.set('steps', 3, 0);
   store.set('trigLoop', true, 0);
+  store.set('mute', false, 3);
 
   const shipped = validateFactoryPresets(readFactory()).find((p) => p.name === 'Default');
-  const seed = store.load(shipped.patch);
+  const seeds = store.load(shipped.patch);
 
-  assert.equal(seed, shipped.patch.seed);
+  assert.deepEqual(seeds, shipped.patch.seeds);
   assert.equal(store.get('bpm'), paramSpec('bpm').def);
   assert.equal(store.get('steps'), paramSpec('steps').def);
   assert.equal(store.get('trigLoop'), paramSpec('trigLoop').def);
+  // Exactly one track audible, and it is the first one.
+  assert.deepEqual([0, 1, 2, 3].map((t) => store.get('mute', t)), [false, true, true, true]);
 });
 
 test('malformed factory entries are skipped rather than taken down the whole set', () => {

@@ -38,6 +38,18 @@ export class UIController {
   }
 
   /**
+   * Point this control surface at a different track.
+   *
+   * One surface is re-bound rather than four being built and hidden, so the DOM
+   * ids stay unique and there is one of every canvas. The caller is responsible
+   * for pushing the new track's values in afterwards -- this only changes where
+   * the next gesture is addressed. See main.js's selectTrack().
+   */
+  setTrackId(trackId) {
+    this.trackId = trackId;
+  }
+
+  /**
    * Render the named groups as slider panels into `container`.
    *
    * `skip` omits keys so they can be rendered elsewhere without appearing twice --

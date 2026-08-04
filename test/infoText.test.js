@@ -22,6 +22,7 @@ const NON_PARAM_IDS = new Set([
   'presetSlots',
   'presetLoad',
   'ring',
+  'trackTab',
 ]);
 
 /** Long enough for a clause, short enough that the footer stays glanceable. */

@@ -355,4 +355,15 @@ export class LfoPanel {
   #emit(key, value) {
     this.bus.emit('param:change', { trackId: this.trackId, key, value });
   }
+
+  /**
+   * Point this panel at a different track -- see main.js's selectTrack().
+   *
+   * The nested division control emits on its own, so it has to be told too;
+   * everything else in here routes through #emit.
+   */
+  setTrackId(trackId) {
+    this.trackId = trackId;
+    this.divisionControl.setTrackId(trackId);
+  }
 }

@@ -101,6 +101,11 @@ export class StepDivisionControl {
     this.bus.emit('param:change', { trackId: this.trackId, key, value });
   }
 
+  /** Point this control at a different track -- see main.js's selectTrack(). */
+  setTrackId(trackId) {
+    this.trackId = trackId;
+  }
+
   /** The two schema keys this control owns. */
   keys() {
     return [this.divisionSpec.key, this.modSpec.key];

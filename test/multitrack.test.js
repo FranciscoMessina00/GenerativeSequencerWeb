@@ -3,13 +3,17 @@ import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/EventBus.js';
 import { Rng } from '../src/core/rng.js';
 import { ParamStore } from '../src/core/ParamStore.js';
+import { paramSpec } from '../src/core/paramSchema.js';
 import { Track } from '../src/sequencer/Track.js';
 import { Scheduler } from '../src/sequencer/Scheduler.js';
+import { Modulation } from '../src/modulation/Modulation.js';
+import { MOD_TARGETS } from '../src/modulation/modTargets.js';
 
 /**
- * Groundwork check: nothing in the sequencing or parameter layers assumes a single
- * track. These tests exist so that adding channels stays a UI problem rather than
- * an engine problem -- if one of them breaks, the plumbing regressed.
+ * Groundwork check: nothing in the sequencing, parameter or modulation layers
+ * assumes a single track. These tests exist so that adding channels stays a UI
+ * problem rather than an engine problem -- if one of them breaks, the plumbing
+ * regressed.
  */
 
 const NULL_TICKER = { start() {}, stop() {}, dispose() {} };
@@ -26,10 +30,13 @@ function harness({ trackCount = 2, bpm = 120 } = {}) {
     tracks,
     ticker: NULL_TICKER,
   });
+  /** Everything the engines were told, so per-track routing can be inspected. */
+  const written = [];
   const store = new ParamStore({
     bus,
     trackCount,
     route: (key, value, trackId, spec) => {
+      written.push({ key, value, trackId, target: spec.target });
       if (spec.target === 'track') tracks[trackId]?.setParam(key, value);
       else if (spec.target === 'transport') scheduler.setParam(key, value);
     },
@@ -44,6 +51,7 @@ function harness({ trackCount = 2, bpm = 120 } = {}) {
     scheduler,
     store,
     steps,
+    written,
     // Explicit, so a test can configure patterns before the clock emits anything --
     // start() itself pumps once.
     start: () => scheduler.start(),
@@ -135,7 +143,7 @@ test('a snapshot round-trips every track independently', () => {
   store.set('steps', 5, 0);
   store.set('steps', 9, 1);
   store.set('steps', 13, 2);
-  const snap = store.snapshot(42);
+  const snap = store.snapshot([42, 43, 44]);
 
   const fresh = new ParamStore({ trackCount: 3 });
   fresh.load(snap);
@@ -143,4 +151,149 @@ test('a snapshot round-trips every track independently', () => {
     [0, 1, 2].map((t) => fresh.get('steps', t)),
     [5, 9, 13],
   );
+});
+
+// ---------------------------------------------------------------------------
+// The voice and the mixer: each track's own timbre
+// ---------------------------------------------------------------------------
+
+test('voice params are per-track, so four pages hold four timbres', () => {
+  const { store } = harness({ trackCount: 4 });
+  store.set('stiffness', 30, 0);
+  store.set('grainDryWet', 0.5, 2);
+
+  assert.equal(store.get('stiffness', 0), 30);
+  assert.equal(store.get('stiffness', 1), paramSpec('stiffness').def, 'must not leak sideways');
+  assert.equal(store.get('grainDryWet', 2), 0.5);
+  assert.equal(store.get('grainDryWet', 0), paramSpec('grainDryWet').def);
+});
+
+test('a voice param is routed with the trackId that owns it', () => {
+  // The engine dispatches on this: get it wrong and track 3's string edits land on
+  // track 1's chain.
+  const { store, written } = harness({ trackCount: 4 });
+  written.length = 0;
+  store.set('decay', 2, 3);
+
+  assert.deepEqual(written, [{ key: 'decay', value: 2, trackId: 3, target: 'voice' }]);
+});
+
+test('every track starts muted, so four of them cannot stack up on load', () => {
+  const { store } = harness({ trackCount: 4 });
+  assert.deepEqual(
+    [0, 1, 2, 3].map((t) => store.get('mute', t)),
+    [true, true, true, true],
+  );
+  // Unmuting one leaves the others alone -- mute is per-track like everything else.
+  store.set('mute', false, 0);
+  assert.deepEqual(
+    [0, 1, 2, 3].map((t) => store.get('mute', t)),
+    [false, true, true, true],
+  );
+});
+
+test('only the tempo and the master fader are shared', () => {
+  const { store } = harness({ trackCount: 4 });
+  store.set('bpm', 90, 3);
+  store.set('masterGain', 0.5, 2);
+  // Written via one track, readable from every track: one clock, one output.
+  assert.deepEqual([0, 1, 2, 3].map((t) => store.get('bpm', t)), [90, 90, 90, 90]);
+  assert.deepEqual([0, 1, 2, 3].map((t) => store.get('masterGain', t)), [0.5, 0.5, 0.5, 0.5]);
+});
+
+// ---------------------------------------------------------------------------
+// One LFO per track
+// ---------------------------------------------------------------------------
+
+/** Four Modulations over one store, wired the way main.js wires them. */
+function lfoHarness(h) {
+  const written = [];
+  const modulations = h.tracks.map((track) => new Modulation({
+    store: h.store,
+    write: (key, value, trackId, spec) => written.push({ key, value, trackId, target: spec.target }),
+    getBarSeconds: () => h.scheduler.barDuration,
+    trackId: track.trackId,
+  }));
+  // The store routes modulation params to the matching track's LFO, as main.js does.
+  h.bus.on('param:changed', ({ trackId, key, value }) => {
+    if (key.startsWith('lfo')) modulations[trackId]?.setParam(key, value);
+  });
+  for (const m of modulations) m.setRunning(true);
+  return { modulations, written };
+}
+
+test('each track has its own LFO, and it drives only its own track', () => {
+  const h = harness({ trackCount: 4 });
+  const { modulations, written } = lfoHarness(h);
+
+  // Two tracks sweeping the same parameter name -- which used to be one global
+  // value the two would fight over.
+  for (const t of [1, 3]) {
+    h.store.set('lfoTarget', MOD_TARGETS.indexOf('stiffness'), t);
+    h.store.set('lfoAmount', 1, t);
+  }
+
+  written.length = 0;
+  for (let i = 0; i < 4; i += 1) {
+    modulations.forEach((m) => m.onStep({ audioTime: i * 0.125, stepDuration: 0.125 }));
+  }
+
+  const touched = [...new Set(written.map((w) => w.trackId))].sort();
+  assert.deepEqual(touched, [1, 3], 'only the mapped tracks may be written');
+  assert.ok(written.every((w) => w.key === 'stiffness'));
+});
+
+test('an unmapped track\'s LFO writes nothing at all', () => {
+  const h = harness({ trackCount: 4 });
+  const { modulations, written } = lfoHarness(h);
+  // Amount without a target, and a target without amount: neither is a mapping.
+  h.store.set('lfoAmount', 1, 0);
+  h.store.set('lfoTarget', MOD_TARGETS.indexOf('decay'), 1);
+
+  written.length = 0;
+  for (const m of modulations) m.onStep({ audioTime: 0, stepDuration: 0.125 });
+  assert.deepEqual(written, []);
+});
+
+test('each LFO advances on its own track\'s steps, at its own resolution', () => {
+  // Track 0 runs at 1/16 and track 1 at 1/8, so over the same span track 0's LFO is
+  // sampled twice as often. Both must cover the same ground: the phase is a
+  // function of elapsed time, not of how many steps carried it.
+  const h = harness({ trackCount: 2, bpm: 120 });
+  const { modulations } = lfoHarness(h);
+  for (const t of [0, 1]) h.store.set('lfoRate', 1, t);
+
+  const span = 0.5;
+  const run = (m, stepDuration) => {
+    for (let t = 0; t < span - 1e-9; t += stepDuration) m.onStep({ audioTime: t, stepDuration });
+  };
+  run(modulations[0], span / 8);
+  run(modulations[1], span / 4);
+
+  assert.ok(Math.abs(modulations[0].phase - modulations[1].phase) < 1e-9,
+    `phases diverged: ${modulations[0].phase} vs ${modulations[1].phase}`);
+  // ...and they are genuinely separate objects, not one shared phase.
+  modulations[0].onStep({ audioTime: span, stepDuration: 0.1 });
+  assert.notEqual(modulations[0].phase, modulations[1].phase);
+});
+
+test('stopping releases every track\'s target, not just the visible one', () => {
+  // An LFO left holding a modulated value would leave that param stuck away from
+  // what the controls show, on a track nobody is looking at.
+  const h = harness({ trackCount: 4 });
+  const { modulations, written } = lfoHarness(h);
+  for (const t of [0, 1, 2, 3]) {
+    h.store.set('lfoTarget', MOD_TARGETS.indexOf('decay'), t);
+    h.store.set('lfoAmount', 1, t);
+    modulations[t].onStep({ audioTime: 0.1, stepDuration: 0.125 });
+  }
+
+  written.length = 0;
+  for (const m of modulations) m.setRunning(false);
+
+  assert.equal(written.length, 4, 'all four must hand their param back');
+  assert.deepEqual([...new Set(written.map((w) => w.trackId))].sort(), [0, 1, 2, 3]);
+  for (const w of written) {
+    assert.equal(w.value, paramSpec('decay').def, 'restored to the stored base value');
+  }
 });

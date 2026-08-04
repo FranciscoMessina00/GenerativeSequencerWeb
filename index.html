@@ -26,11 +26,20 @@
          has a param schema entry to take a key from; every control that does gets
          the attribute from its own spec, in its widget's constructor. -->
     <div class="transport">
+      <!-- Tempo and master level, the instrument's only two global params, as
+           drag-numbers filled by UIController.renderDragNumbers. They belong up here
+           rather than in a track's control panel: every track runs off this clock
+           and sums into this fader. -->
+      <div class="transport__nums" id="transport-nums"></div>
       <button id="play" class="primary" data-info="play">Play</button>
       <button id="pluck" data-info="pluck">Pluck once</button>
       <button id="reseed" data-info="reseed">Reseed</button>
     </div>
   </header>
+
+  <!-- The four track pages. Filled by src/ui/TrackTabs.js, and full-width because it
+       switches both columns below, not just the ring. -->
+  <div class="tabs-row" id="tabs-row"></div>
 
   <main>
     <aside class="rhythm-col">

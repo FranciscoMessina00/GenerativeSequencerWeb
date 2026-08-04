@@ -1,10 +1,21 @@
 /**
  * Single declarative source of truth for every control.
  *
- * `target` routes a change to the right consumer: 'track' params drive pattern
- * generation, 'voice' params drive the DSP worklets, 'transport' drives the clock.
- * The UI builds itself from this list, and Track/AudioEngine take their defaults
- * from it, so a range only ever needs changing in one place.
+ * Two orthogonal fields decide what happens to a value, and conflating them is a
+ * mistake worth naming:
+ *
+ *   `target`  WHO receives it. 'track' params drive pattern generation, 'voice'
+ *             params drive one track's DSP chain, 'transport' drives the clock,
+ *             'master' the output fader, 'modulation' the LFO itself. Track,
+ *             Scheduler, TrackVoice and Modulation each take their defaults from
+ *             defaultsFor(<their target>).
+ *
+ *   `scope`   HOW MANY copies exist. Omitted means one per track -- the common
+ *             case, since four pages want four of nearly everything. Only
+ *             `scope: 'global'` params are single-valued, and there are exactly
+ *             two: the tempo and the master fader. ParamStore is the only reader.
+ *
+ * The UI builds itself from this list, so a range only ever needs changing here.
  */
 
 export const PARAM_SCHEMA = [
@@ -105,9 +116,25 @@ export const PARAM_SCHEMA = [
   { key: 'grainPitch', label: 'Grain Pitch', group: 'Granulator', target: 'voice', min: 0.5, max: 2, step: 0.01, def: 1 },
   { key: 'grainDryWet', label: 'Grain Dry/Wet', group: 'Granulator', target: 'voice', min: -1, max: 1, step: 0.01, def: -1 },
 
+  // ---- Mixer: one track's contribution to the sum --------------------------
+  // Drawn on the track tab strip rather than as sliders, which is why 'Mixer' is
+  // absent from main.js's CONTROL_GROUPS -- see ui/TrackTabs.js.
+  //
+  // Muted by default, deliberately. "A track is silent unless something says
+  // otherwise" is what makes resetting a track to its defaults safe: four tracks
+  // booting audible would stack four copies of the same Euclid pattern. main.js
+  // unmutes track 0 once at boot, and every saved patch carries the rest.
+  { key: 'mute', label: 'Mute', group: 'Mixer', target: 'voice', type: 'toggle', def: true },
+  { key: 'level', label: 'Level', group: 'Mixer', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.8, display: 'percent' },
+
   // ---- Transport ----------------------------------------------------------
-  { key: 'bpm', label: 'BPM', group: 'Transport', target: 'transport', min: 30, max: 300, step: 1, def: 120 },
-  { key: 'masterGain', label: 'Master', group: 'Transport', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.8 },
+  // The only two global params in the schema. Everything above is per-track.
+  { key: 'bpm', label: 'BPM', group: 'Transport', target: 'transport', scope: 'global', min: 30, max: 300, step: 1, def: 120 },
+  // target 'master' rather than 'voice': it is the one fader after the sum of all
+  // four tracks, so it belongs to the AudioEngine itself and not to any TrackVoice.
+  // That split is also what keeps defaultsFor('voice') equal to exactly one
+  // track's voice bag.
+  { key: 'masterGain', label: 'Master', group: 'Transport', target: 'master', scope: 'global', min: 0, max: 1, step: 0.01, def: 0.8 },
 ];
 
 export const PARAM_GROUPS = [...new Set(PARAM_SCHEMA.map((p) => p.group))];

@@ -1,0 +1,200 @@
+<!doctype html>
+<!-- Manual check for the track tab strip: four tabs each in their own page colour,
+     selection reported out rather than acted on, mute and level emitting per-track,
+     the roving tabindex and arrow-key navigation, and the progress bars filling
+     against a fake audio clock -- including the rule that the selected tab's own bar
+     is hidden, because the ring beside it says the same thing better.
+
+     Browser-only: it needs real elements, real inline custom properties, and a real
+     computed style to tell "hidden" from "styled to look empty". -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+/* Fixed width so the four equal columns are deterministic. */
+#mount{width:720px;}</style>
+</head>
+<body>
+<div id="mount"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { TrackTabs } from '../../src/ui/TrackTabs.js';
+import { paramSpec } from '../../src/core/paramSchema.js';
+import { PAGE_PALETTES } from '../../src/ui/palette.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const bus = new EventBus();
+const events = [];
+bus.on('param:change', (e) => events.push(e));
+const emitted = () => events.map((e) => `${e.key}@${e.trackId}=${e.value}`).join(',');
+
+// A fake, fully controllable audio clock, and selection captured rather than acted
+// on -- switching pages is the bootstrap's job, not the strip's.
+let now = 0;
+const selected = [];
+const tabs = new TrackTabs({
+  bus,
+  trackCount: 4,
+  muteSpec: paramSpec('mute'),
+  levelSpec: paramSpec('level'),
+  getAudioTime: () => now,
+  onSelect: (trackId) => selected.push(trackId),
+  active: 0,
+});
+document.getElementById('mount').appendChild(tabs.element);
+
+log('-- four tabs, each carrying its own page colour --');
+check('four of them', tabs.element.querySelectorAll('.tab').length, 4);
+check('announced as a tablist', tabs.element.getAttribute('role'), 'tablist');
+check('each is a tab', [...tabs.element.querySelectorAll('[role="tab"]')].length, 4);
+// The whole per-page-colour trick: --accent set inline on the tab, so all four read
+// as their own colour even though only one of them is the document's accent.
+const accents = tabs.lanes.map((l) => l.element.style.getPropertyValue('--accent').trim());
+check('every tab has its own accent', accents.join(','), PAGE_PALETTES.map((p) => p.accent).join(','));
+check('and they are all different', new Set(accents).size, 4);
+check('names come from the palette', tabs.lanes.map((l) => l.name).join(','), 'I,II,III,IV');
+
+log('\n-- the two keys it owns --');
+check('mute and level', tabs.keys().join(','), 'mute,level');
+
+log('\n-- selection is reported, not performed --');
+tabs.lanes[2].element.click();
+check('the click asks for track 2', selected.join(','), '2');
+check('...and nothing moved on its own', tabs.active, 0);
+check('no param was emitted', emitted(), '');
+tabs.setActive(2);
+check('now it is active', tabs.lanes[2].element.classList.contains('is-active'), 'true');
+check('aria-selected followed', tabs.lanes[2].element.getAttribute('aria-selected'), 'true');
+check('and the old one let go', tabs.lanes[0].element.getAttribute('aria-selected'), 'false');
+// Roving tabindex: one tab stop for the strip, arrows to move inside it.
+check('only the active tab is a tab stop', tabs.lanes.map((l) => l.element.tabIndex).join(','), '-1,-1,0,-1');
+
+log('\n-- arrow keys move between tabs, and wrap --');
+const key = (trackId, k) => tabs.lanes[trackId].element.dispatchEvent(
+  new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }),
+);
+selected.length = 0;
+key(2, 'ArrowRight');
+key(3, 'ArrowRight');
+key(0, 'ArrowLeft');
+key(1, 'Home');
+key(0, 'End');
+check('right, wrap, left, home, end', selected.join(','), '3,0,3,0,3');
+check('an unrelated key is left alone', (() => {
+  selected.length = 0;
+  key(0, 'a');
+  return selected.length;
+})(), 0);
+
+log('\n-- mute and level emit for their own track, without selecting it --');
+tabs.setActive(0);
+events.length = 0;
+selected.length = 0;
+// Track 3's dot, while track 0 is the page on screen.
+tabs.lanes[3].muteButton.click();
+check('emits for track 3', emitted(), 'mute@3=false');
+check('and did not drag the page over with it', selected.length, 0);
+
+events.length = 0;
+tabs.lanes[1].level.setValue(0.5);
+check('setValue never echoes back onto the bus', emitted(), '');
+check('...but it does move the readout', tabs.lanes[1].level.valueEl.textContent, '50');
+
+log('\n-- mute state is per track, and reflected without emitting --');
+events.length = 0;
+tabs.setValue('mute', false, 0);
+tabs.setValue('mute', true, 1);
+check('nothing emitted', emitted(), '');
+check('track 0 audible', tabs.lanes[0].muteButton.classList.contains('is-muted'), 'false');
+check('track 1 muted', tabs.lanes[1].muteButton.classList.contains('is-muted'), 'true');
+// The glyph itself changes, not just the colour: filled for audible, hollow for muted.
+const dotFilled = (i) => Boolean(tabs.lanes[i].muteButton.querySelector('.icon__dot'));
+check('audible is the filled dot', dotFilled(0), 'true');
+check('muted is the hollow one', dotFilled(1), 'false');
+check('a muted tab dims', tabs.lanes[1].element.classList.contains('is-muted'), 'true');
+check('an out-of-range track is a safe no-op',
+  (() => { tabs.setValue('mute', true, 9); return 'ok'; })(), 'ok');
+
+log('\n-- the bars fill against the audio clock, one revolution per pattern --');
+// Asserted on computed visibility, not on a class: the point is whether the groove
+// is actually off screen.
+const barShown = (i) => getComputedStyle(tabs.lanes[i].bar).visibility !== 'hidden';
+check('the active tab hides its own bar', barShown(0), 'false');
+check('the others show theirs', [1, 2, 3].every((i) => barShown(i)), 'true');
+
+const fill = (i) => tabs.lanes[i].fill.style.transform;
+tabs.setRunning(true);
+// Steps are handed over ~100ms early and gated on the clock, exactly as the ring
+// does -- so enqueueing alone must move nothing.
+tabs.enqueue({ trackId: 1, stepIndex: 0, audioTime: 1, stepDuration: 0.125 }, 8);
+now = 0.5;
+tabs.frame();
+check('a step that has not sounded yet moves nothing', fill(1), 'scaleX(0)');
+
+now = 1;
+tabs.frame();
+check('step 0 of 8, at its own time', fill(1), 'scaleX(0)');
+now = 1.0625;
+tabs.frame();
+check('half way through step 0 of 8', fill(1), 'scaleX(0.06)');
+
+tabs.enqueue({ trackId: 1, stepIndex: 4, audioTime: 2, stepDuration: 0.125 }, 8);
+now = 2;
+tabs.frame();
+check('step 4 of 8 is half the ring', fill(1), 'scaleX(0.5)');
+
+// A shorter pattern on another track: the bar spans one revolution, so the same
+// step index is further along.
+tabs.enqueue({ trackId: 2, stepIndex: 2, audioTime: 2, stepDuration: 0.125 }, 4);
+tabs.frame();
+check('step 2 of 4 is also half', fill(2), 'scaleX(0.5)');
+check('a track with no steps stays empty', fill(3), 'scaleX(0)');
+
+log('\n-- a stalled frame catches up rather than replaying --');
+for (const stepIndex of [5, 6, 7]) {
+  tabs.enqueue({ trackId: 1, stepIndex, audioTime: 2 + stepIndex * 0.125, stepDuration: 0.125 }, 8);
+}
+now = 3;
+tabs.frame();
+check('it lands on the newest audible step, not the oldest', fill(1), 'scaleX(1)');
+check('and the queue is drained', tabs.lanes[1].queue.length, 0);
+
+log('\n-- stopping empties every groove --');
+tabs.setRunning(false);
+check('all four reset', [0, 1, 2, 3].map((i) => fill(i)).join(','),
+  'scaleX(0),scaleX(0),scaleX(0),scaleX(0)');
+check('and the queues are dropped', tabs.lanes.every((l) => l.queue.length === 0), 'true');
+check('a frame while stopped paints nothing', (() => {
+  now = 99;
+  tabs.frame();
+  return fill(1);
+})(), 'scaleX(0)');
+
+log('\n-- layout --');
+const strip = tabs.element.getBoundingClientRect();
+const widths = tabs.lanes.map((l) => Math.round(l.element.getBoundingClientRect().width));
+check('four equal columns', new Set(widths).size, 1);
+const spills = tabs.lanes.filter((l) => {
+  const b = l.element.getBoundingClientRect();
+  return b.left < strip.left - 0.5 || b.right > strip.right + 0.5;
+});
+check('no tab spills out of the strip', spills.length, 0);
+// Switching pages must not change the row's height, which is why the hidden bar
+// keeps its box.
+const heights = tabs.lanes.map((l) => l.element.getBoundingClientRect().height.toFixed(2));
+check('every tab is the same height, active or not', new Set(heights).size, 1);
+log(`strip ${Math.round(strip.width)}x${Math.round(strip.height)}px; tab ${widths[0]}x${heights[0]}px`);
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'track-tabs-check-done' : 'track-tabs-check-failed';
+</script>
+</body>
+</html>

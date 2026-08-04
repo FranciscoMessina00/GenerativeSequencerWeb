@@ -1,3 +1,5 @@
+import { paletteFor } from './palette.js';
+
 /**
  * The circular step display: one annular sector per step, solid where the pattern
  * has a pulse. Sectors rather than dots so each step visibly owns a slice of the
@@ -44,6 +46,11 @@ export class EuclidView {
     this.loopBits = new Map();
     this.loopActive = false;
     this.running = false;
+    /**
+     * Which page's colours to draw in. Page 0 by default rather than nothing, so a
+     * view that is never told (the browser check pages) still draws.
+     */
+    this.palette = paletteFor(0);
     /** Repaint only when something actually changed; see frame(). */
     this.dirty = true;
 
@@ -137,13 +144,37 @@ export class EuclidView {
 
   setRunning(running) {
     this.running = running;
-    if (!running) {
-      this.queue.length = 0;
-      this.currentStep = -1;
-      // Otherwise the fired/loop-buffer bands stay lit on a stopped ring.
-      this.fired.clear();
-      this.loopBits.clear();
-    }
+    // Otherwise the fired/loop-buffer bands stay lit on a stopped ring.
+    if (!running) this.clearPlayhead();
+    this.dirty = true;
+  }
+
+  /**
+   * Forget everything about where the playhead is and what has fired, without
+   * touching run state.
+   *
+   * Used when the ring is re-pointed at a different track (see main.js's
+   * selectTrack): the marks it is holding describe the track it was showing a
+   * moment ago, and a stopped-looking ring on a running sequence is less wrong
+   * than a ring confidently displaying another track's history. It refills over
+   * one revolution.
+   */
+  clearPlayhead() {
+    this.queue.length = 0;
+    this.currentStep = -1;
+    this.fired.clear();
+    this.loopBits.clear();
+    this.dirty = true;
+  }
+
+  /**
+   * Draw in a different page's colours -- see ui/palette.js. Handed the derived
+   * object rather than a page index, and rather than reading custom properties off
+   * the element: getComputedStyle in a draw path forces layout every frame.
+   */
+  setPalette(palette) {
+    if (!palette) return;
+    this.palette = palette;
     this.dirty = true;
   }
 
@@ -180,6 +211,7 @@ export class EuclidView {
 
   draw() {
     const ctx = this.ctx;
+    const c = this.palette;
     const w = this.cssWidth;
     const h = this.cssHeight;
     ctx.clearRect(0, 0, w, h);
@@ -221,14 +253,12 @@ export class EuclidView {
       // Solid = the pattern has a pulse here; faint = it does not.
       this.#sectorPath(cx, cy, euclidInner, outerR, a0, a1);
       if (isPulse) {
-        ctx.fillStyle = isPlayhead ? '#a8dcff' : '#4a90b8';
+        ctx.fillStyle = isPlayhead ? c.ringPulseHead : c.ringPulse;
         ctx.fill();
       } else {
-        ctx.fillStyle = isPlayhead
-          ? 'rgba(143, 211, 255, 0.30)'
-          : 'rgba(255, 255, 255, 0.055)';
+        ctx.fillStyle = isPlayhead ? c.ringRestHead : c.ringRest;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+        ctx.strokeStyle = c.ringRestLine;
         ctx.lineWidth = 1;
         ctx.stroke();
       }
@@ -239,14 +269,12 @@ export class EuclidView {
       if (this.loopActive) {
         this.#sectorPath(cx, cy, innerR, randomOuter, a0, a1);
         if (isRandomOn) {
-          ctx.fillStyle = isPlayhead ? '#f3dcae' : 'rgba(224, 184, 111, 0.9)';
+          ctx.fillStyle = isPlayhead ? c.ringRandomHead : c.ringRandom;
           ctx.fill();
         } else {
-          ctx.fillStyle = isPlayhead
-            ? 'rgba(224, 184, 111, 0.30)'
-            : 'rgba(255, 255, 255, 0.05)';
+          ctx.fillStyle = isPlayhead ? c.ringRandomOff : c.ringRandomRest;
           ctx.fill();
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.10)';
+          ctx.strokeStyle = c.ringRestLine;
           ctx.lineWidth = 1;
           ctx.stroke();
         }
@@ -256,7 +284,7 @@ export class EuclidView {
       // when split -- since it names which step is current, not which half.
       if (isPlayhead) {
         this.#sectorPath(cx, cy, innerR, outerR, a0, a1);
-        ctx.strokeStyle = '#cfeaff';
+        ctx.strokeStyle = c.ringPlayhead;
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
@@ -266,7 +294,8 @@ export class EuclidView {
       // or the random stream changed the outcome.
       if (didFire) {
         this.#sectorPath(cx, cy, outerR + 3, outerR + 7, a0, a1);
-        ctx.fillStyle = 'rgba(130, 230, 150, 0.9)';
+        // The one colour that does not follow the page -- see ui/palette.js.
+        ctx.fillStyle = c.ringFired;
         ctx.fill();
       }
     }
@@ -276,9 +305,9 @@ export class EuclidView {
     // hub already name the step count, and the moving playhead shows run state.
     ctx.beginPath();
     ctx.arc(cx, cy, innerR - 1, 0, Math.PI * 2);
-    ctx.fillStyle = '#191d24';
+    ctx.fillStyle = c.hubDisc;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = c.hubDiscEdge;
     ctx.lineWidth = 1;
     ctx.stroke();
   }

@@ -3,15 +3,98 @@
  * visible at once, no scrolling between a control and the sound it shapes.
  */
 
+/*
+ * Colour lives here and in src/ui/palette.js, which owns the four page schemes and
+ * writes --accent (plus the two ring tokens the canvases share) onto <html> when a
+ * track page is selected. Everything below derives from --accent, so that one
+ * assignment retints every panel, border and active state at once.
+ *
+ * The rule for adding a colour: never write the accent out by hand. This file used
+ * to spell `rgba(111, 184, 224, α)` twenty-seven times, which is exactly why a
+ * second page was impossible.
+ */
 :root {
-  --bg: #12151a;
-  --panel: #191d24;
-  --panel-2: #1f242c;
-  --line: #2b323c;
+  /* Page 1's accent, and the value a browser with no JS keeps. palette.js
+     overwrites it per page -- see applyPalette(). */
+  --accent: #6fb8e0;
+  /* The random-pulse counterpart, likewise per page. */
+  --accent-alt: #e0b86f;
+  /* Deliberately NOT per page: "it fired", and "the LFO reaches this far". Those
+     are facts about the instrument, not about which page you are looking at. */
+  --accent-2: #82e696;
+
+  /* Untinted bases. Mirrored by BASE in src/ui/palette.js, which needs them for the
+     canvas colours; a test pins the two copies together. Not used directly -- the
+     tinted tokens below are what the rules reference. */
+  --base-bg: #12151a;
+  --base-panel: #191d24;
+  --base-panel-2: #1f242c;
+  --base-line: #2b323c;
+  --base-well: #0e1116;
+
   --text: #dde3ea;
   --muted: #8b95a3;
-  --accent: #6fb8e0;
-  --accent-2: #82e696;
+
+  /* Surfaces, carrying a trace of the page's hue so each page feels like its own
+     room without any of them stopping being dark grey. Percentages stay small on
+     purpose: past about 8% the text contrast starts to move.
+
+     Each is declared twice -- the plain base first, then the tinted version. A
+     browser without color-mix() discards the second declaration and keeps the
+     untinted colour, which is the old look rather than a broken one. */
+  --bg: #12151a;
+  --bg: color-mix(in srgb, var(--accent) 4%, var(--base-bg));
+  --panel: #191d24;
+  --panel: color-mix(in srgb, var(--accent) 5%, var(--base-panel));
+  --panel-2: #1f242c;
+  --panel-2: color-mix(in srgb, var(--accent) 6%, var(--base-panel-2));
+  --line: #2b323c;
+  --line: color-mix(in srgb, var(--accent) 12%, var(--base-line));
+  /* The inset "well" behind sliders, scopes and the readout -- darker than --bg. */
+  --well: #0e1116;
+  --well: color-mix(in srgb, var(--accent) 4%, var(--base-well));
+
+  /* The accent at the opacities the widgets use, as a ladder rather than as
+     thirty hand-written rgba() triples. The vocabulary is deliberately small:
+       09  hover background        16  the engaged signature, with a solid border
+       28  hover border            45/50/55/60/85  handles, glows, dashed outlines */
+  --accent-09: color-mix(in srgb, var(--accent) 9%, transparent);
+  --accent-16: color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-28: color-mix(in srgb, var(--accent) 28%, transparent);
+  --accent-45: color-mix(in srgb, var(--accent) 45%, transparent);
+  --accent-50: color-mix(in srgb, var(--accent) 50%, transparent);
+  --accent-55: color-mix(in srgb, var(--accent) 55%, transparent);
+  --accent-60: color-mix(in srgb, var(--accent) 60%, transparent);
+  --accent-85: color-mix(in srgb, var(--accent) 85%, transparent);
+
+  /* The modulation green at the two opacities its marks use. */
+  --accent-2-65: color-mix(in srgb, var(--accent-2) 65%, transparent);
+  --accent-2-90: color-mix(in srgb, var(--accent-2) 90%, transparent);
+
+  /* Pre-blended over the well rather than laid on it with alpha: the bias/spread
+     band sits on a track that already has its own background, and stacking two
+     translucent layers there read muddy. These were the hand-mixed #29404f and
+     #3a5c71. */
+  --band: #29404f;
+  --band: color-mix(in srgb, var(--accent) 28%, var(--well));
+  --band-hover: #3a5c71;
+  --band-hover: color-mix(in srgb, var(--accent) 45%, var(--well));
+
+  /* Transport-playing green. Follows --accent-2, not the page: Play means the same
+     thing everywhere. This was #2c4a3a. */
+  --playing: #2c4a3a;
+  --playing: color-mix(in srgb, var(--accent-2) 26%, var(--base-well));
+
+  /* Written by palette.js so the canvas and the legend swatches cannot drift --
+     they had, as #4a90b8 in EuclidView versus #4a90b8 in .swatch.pulse. The values
+     here are page 1's, for the no-JS case. */
+  --ring-pulse: #4a90b8;
+  --ring-random: rgba(224, 184, 111, 0.9);
+
+  /* Neutral whites: absence -- an empty step, a zero line. Absence has no hue, so
+     these never follow the accent. */
+  --rest: rgba(255, 255, 255, 0.055);
+  --rest-line: rgba(255, 255, 255, 0.16);
 }
 
 * { box-sizing: border-box; }
@@ -44,10 +127,10 @@ header {
 /* Column 3 fills its half, so the buttons are pinned to the right edge. */
 header > .transport { justify-self: end; }
 
-/* Below this the three groups no longer fit side by side (their combined
-   min-content is ~820px), and a grid would overflow rather than wrap -- so stack
-   them explicitly instead. */
-@media (max-width: 860px) {
+/* Below this the three groups no longer fit side by side (with the two transport
+   drag-numbers added their combined min-content is ~980px), and a grid would
+   overflow rather than wrap -- so stack them explicitly instead. */
+@media (max-width: 1000px) {
   header {
     grid-template-columns: 1fr;
     row-gap: 10px;
@@ -59,7 +142,22 @@ h1 { font-size: 15px; margin: 0; font-weight: 600; }
 h1 .sub { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
 .status { margin: 2px 0 0; color: var(--muted); font: 11px ui-monospace, monospace; }
 
-.transport { display: flex; gap: 8px; }
+.transport { display: flex; gap: 8px; align-items: center; }
+
+/* Tempo and master, before the buttons. A separator rather than extra gap, because
+   they are a different kind of thing from Play: two values you set against three
+   actions you take. */
+.transport__nums {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding-right: 10px;
+  margin-right: 2px;
+  border-right: 1px solid var(--line);
+}
+.transport__nums .dragnum { padding: 4px 7px; }
+.transport__nums .dragnum__value { font-size: 16px; }
+.transport__nums .dragnum__label { font-size: 9px; }
 
 button {
   background: var(--panel-2);
@@ -72,7 +170,129 @@ button {
 }
 button:hover { border-color: var(--accent); }
 button.primary { min-width: 82px; font-weight: 600; }
-button.primary.active { background: #2c4a3a; border-color: var(--accent-2); color: var(--accent-2); }
+button.primary.active { background: var(--playing); border-color: var(--accent-2); color: var(--accent-2); }
+
+/* ---- track pages: four tabs, each with its own colour and playhead ---- */
+
+/* Its own row between the header and main, full width, because selecting a page
+   swaps both columns below rather than only the ring. */
+.tabs-row { padding: 12px 18px 0; }
+
+.tabs {
+  display: grid;
+  /* Equal columns, so no tab's width implies importance and the four bars are
+     directly comparable at a glance. */
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+/* A div rather than a button, because it contains a button (mute) and a drag-number
+   (level) -- nesting those inside a button is invalid and breaks both. So the
+   affordances a button would have come back by hand. */
+.tab {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 9px 7px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+  /* Colour only: a moving border on the selected tab would shift the row's height. */
+  transition: background-color 0.12s, border-color 0.12s;
+}
+.tab:hover { border-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The engaged signature the rest of the instrument uses -- see .lfo__sync.is-active
+   and .trig-loop__toggle.is-active. Here `--accent` is the tab's own page colour,
+   set inline by TrackTabs, so each selected tab lights in its own hue. */
+.tab.is-active {
+  background: var(--accent-16);
+  border-color: var(--accent);
+}
+
+/* Dimmed rather than hidden: a muted track is still running, and its bar still
+   moves. Excludes the selected tab, whose controls are on screen either way. */
+.tab.is-muted:not(.is-active) { opacity: 0.62; }
+
+/* Left-aligned rather than spread across the tab: the tabs are a quarter of the page
+   wide, so pinning the level to the far edge left a couple of hundred pixels of
+   nothing in the middle. Hugging the left also puts the cluster where the bar below
+   it starts filling from. */
+.tab__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.tab__name {
+  color: var(--accent);
+  font: 600 11px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  /* Room for the widest name, so the level numbers line up across all four tabs
+     however many characters the name takes. */
+  min-width: 22px;
+}
+
+.tab__mute {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+.tab__mute .icon { width: 9px; height: 9px; }
+.tab__mute:hover { border-color: var(--accent); background: var(--accent-09); }
+/* Hollow dot and a muted colour: the glyph says silent and so does the ink. */
+.tab__mute.is-muted { color: var(--muted); }
+
+/* Level loses its box, so the tab reads as one control rather than a control
+   containing another. Left-aligned to match the cluster it sits in. */
+.tab .dragnum {
+  align-items: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+}
+.tab .dragnum:hover { background: none; border: none; }
+.tab .dragnum__value { font-size: 12px; }
+.tab .dragnum__label { font-size: 8px; }
+
+/* The groove. Fixed height whether or not a fill is showing, so switching pages
+   cannot change the row's height. */
+.tab__bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--well);
+  overflow: hidden;
+}
+
+/* Hidden, not removed, on the selected tab: the ring beside it says the same thing
+   with a whole revolution of detail, and keeping the box preserves the height. */
+.tab.is-active .tab__bar { visibility: hidden; }
+
+/* scaleX from the left edge, so TrackTabs can animate it on the compositor without
+   touching layout. Starts empty. */
+.tab__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+/* Stacked, the four tabs would each be a full-width row of chrome for no gain --
+   two columns keeps the strip to two lines. */
+@media (max-width: 640px) {
+  .tabs { grid-template-columns: repeat(2, 1fr); }
+}
 
 main {
   display: grid;
@@ -184,7 +404,7 @@ main {
 }
 .step-division__mod:hover { border-color: var(--accent); color: var(--text); }
 .step-division__mod.is-active {
-  background: rgba(111, 184, 224, 0.16);
+  background: var(--accent-16);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -215,18 +435,18 @@ main {
 .legend span[hidden] { display: none; }
 /* Small wedge-ish bars, matching the ring's sectors rather than dots. */
 .swatch { width: 7px; height: 13px; border-radius: 1px; display: inline-block; }
-.swatch.pulse { background: #4a90b8; }
-.swatch.rest { background: rgba(255, 255, 255, 0.055); border: 1px solid rgba(255, 255, 255, 0.16); }
-.swatch.fired { background: rgba(130, 230, 150, 0.9); height: 5px; }
+.swatch.pulse { background: var(--ring-pulse); }
+.swatch.rest { background: var(--rest); border: 1px solid var(--rest-line); }
+.swatch.fired { background: var(--accent-2-90); height: 5px; }
 /* Full height, unlike .fired: it now shares the main band as an equal half
    rather than living outside it as a thin accent -- see EuclidView.draw(). */
-.swatch.random { background: rgba(224, 184, 111, 0.9); }
+.swatch.random { background: var(--ring-random); }
 
 #readout {
   margin: 0;
   padding: 8px;
   min-height: 240px;
-  background: #0e1116;
+  background: var(--well);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--muted);
@@ -319,7 +539,7 @@ input[type="range"] {
   top: 2px;
   width: 2px;
   height: 14px;
-  background: rgba(130, 230, 150, 0.65);
+  background: var(--accent-2-65);
   transform: translateX(-1px);
   pointer-events: none;
 }
@@ -396,8 +616,8 @@ input[type="range"]::-moz-range-thumb {
 
 .dragnum:hover,
 .dragnum:focus-visible {
-  background: rgba(111, 184, 224, 0.09);
-  border-color: rgba(111, 184, 224, 0.28);
+  background: var(--accent-09);
+  border-color: var(--accent-28);
   outline: none;
 }
 
@@ -406,15 +626,15 @@ input[type="range"]::-moz-range-thumb {
 .dragnum:focus-visible .dragnum__value,
 .dragnum.is-dragging .dragnum__value {
   color: var(--accent);
-  text-shadow: 0 0 14px rgba(111, 184, 224, 0.45);
+  text-shadow: 0 0 14px var(--accent-45);
 }
 
 .dragnum:hover .dragnum__label,
 .dragnum:focus-visible .dragnum__label { color: var(--text); }
 
 .dragnum.is-dragging {
-  background: rgba(111, 184, 224, 0.16);
-  border-color: rgba(111, 184, 224, 0.5);
+  background: var(--accent-16);
+  border-color: var(--accent-50);
 }
 .control.toggle input[type="checkbox"] {
   width: 15px;
@@ -506,8 +726,8 @@ input[type="range"]::-moz-range-thumb {
 }
 .bsslider__axis-toggle:hover,
 .bsslider__axis-toggle:focus-visible {
-  background: rgba(111, 184, 224, 0.09);
-  border-color: rgba(111, 184, 224, 0.28);
+  background: var(--accent-09);
+  border-color: var(--accent-28);
   color: var(--text);
   outline: none;
 }
@@ -568,18 +788,17 @@ input[type="range"]::-moz-range-thumb {
   height: 10px;
   margin-top: -5px;
   border-radius: 5px;
-  /* Solid, not translucent -- these are #6fb8e0 (--accent) pre-blended over the
-     track's #0e1116 background at the same 0.28/0.45 weights the old rgba()
-     used, so the look is unchanged, but the colour no longer depends on
-     whatever happens to render underneath it. */
-  background: #29404f;
+  /* Solid, not translucent: --band is the accent pre-blended over the track's own
+     --well background, so the colour does not depend on whatever happens to render
+     underneath it. Both are defined in :root and follow the page. */
+  background: var(--band);
   pointer-events: none;
   transition: background-color 0.12s;
 }
 
 .bsslider__track:hover .bsslider__band,
 .bsslider__track.is-dragging .bsslider__band {
-  background: #3a5c71;
+  background: var(--band-hover);
 }
 
 /* The LFO's sweep along the bias axis, when this track is its target -- shifted
@@ -594,7 +813,7 @@ input[type="range"]::-moz-range-thumb {
   height: 3px;
   margin-top: -13px;
   border-radius: 2px;
-  background: rgba(130, 230, 150, 0.65);
+  background: var(--accent-2-65);
   pointer-events: none;
 }
 .bsslider__track.has-mod-range .bsslider__modrange { display: block; }
@@ -607,8 +826,8 @@ input[type="range"]::-moz-range-thumb {
   margin: -6.5px 0 0 -6.5px;
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid #0e1116;
-  box-shadow: 0 0 0 1px rgba(111, 184, 224, 0.5);
+  border: 2px solid var(--well);
+  box-shadow: 0 0 0 1px var(--accent-50);
   pointer-events: none;
   transition: box-shadow 0.12s;
 }
@@ -616,7 +835,7 @@ input[type="range"]::-moz-range-thumb {
 .bsslider__track:hover .bsslider__handle,
 .bsslider__track.is-dragging .bsslider__handle,
 .bsslider__track:focus-visible .bsslider__handle {
-  box-shadow: 0 0 0 1px rgba(111, 184, 224, 0.85), 0 0 12px rgba(111, 184, 224, 0.6);
+  box-shadow: 0 0 0 1px var(--accent-85), 0 0 12px var(--accent-60);
 }
 
 /* ---- control row: places a couple of small controls side by side ---- */
@@ -879,7 +1098,7 @@ input[type="range"]::-moz-range-thumb {
 .fillicon__fill {
   color: var(--accent);
   clip-path: inset(var(--fill-top, 100%) 0 0 0);
-  filter: drop-shadow(0 0 3px rgba(111, 184, 224, 0.6));
+  filter: drop-shadow(0 0 3px var(--accent-60));
 }
 
 /* The LFO's reach, when this control is its target -- a line beside the glyph
@@ -898,7 +1117,7 @@ input[type="range"]::-moz-range-thumb {
 .fillicon__modrange {
   margin-left: 5px;
   width: 2px;
-  background: rgba(130, 230, 150, 0.65);
+  background: var(--accent-2-65);
   border-radius: 1px;
 }
 
@@ -908,7 +1127,7 @@ input[type="range"]::-moz-range-thumb {
   height: 6px;
   margin-top: -3px;
   border-radius: 50%;
-  background: rgba(130, 230, 150, 0.9);
+  background: var(--accent-2-90);
 }
 
 /* Fixed height regardless of what text is inside -- the caption and the peeked
@@ -929,16 +1148,16 @@ input[type="range"]::-moz-range-thumb {
 
 .fillicon:hover,
 .fillicon:focus-visible {
-  background: rgba(111, 184, 224, 0.09);
-  border-color: rgba(111, 184, 224, 0.28);
+  background: var(--accent-09);
+  border-color: var(--accent-28);
   outline: none;
 }
 .fillicon:hover .fillicon__label,
 .fillicon:focus-visible .fillicon__label { color: var(--text); }
 
 .fillicon.is-dragging {
-  background: rgba(111, 184, 224, 0.16);
-  border-color: rgba(111, 184, 224, 0.5);
+  background: var(--accent-16);
+  border-color: var(--accent-50);
 }
 /* While dragging the caption is already showing the live percentage (see
    FillIconControl's hover/drag peek), so it gets the same accent treatment DragNumber
@@ -969,8 +1188,8 @@ input[type="range"]::-moz-range-thumb {
 }
 .logic-op:hover,
 .logic-op:focus-visible {
-  background: rgba(111, 184, 224, 0.09);
-  border-color: rgba(111, 184, 224, 0.28);
+  background: var(--accent-09);
+  border-color: var(--accent-28);
   outline: none;
 }
 
@@ -1037,14 +1256,14 @@ input[type="range"]::-moz-range-thumb {
 }
 .trig-loop__toggle:hover,
 .trig-loop__toggle:focus-visible {
-  background: rgba(111, 184, 224, 0.09);
-  border-color: rgba(111, 184, 224, 0.28);
+  background: var(--accent-09);
+  border-color: var(--accent-28);
   color: var(--text);
   outline: none;
 }
 /* The project's engaged signature, as used by .step-division__mod. */
 .trig-loop__toggle.is-active {
-  background: rgba(111, 184, 224, 0.16);
+  background: var(--accent-16);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1084,7 +1303,7 @@ input[type="range"]::-moz-range-thumb {
      which is too squat to tell a folded sine from a triangle -- and the shape being
      legible at a glance is the entire point of the panel. */
   height: 68px;
-  background: #0e1116;
+  background: var(--well);
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
@@ -1177,13 +1396,13 @@ input[type="range"]::-moz-range-thumb {
 }
 .lfo__sync .icon { width: 16px; height: 16px; }
 .lfo__sync:hover, .lfo__sync:focus-visible {
-  border-color: rgba(111, 184, 224, 0.28);
+  border-color: var(--accent-28);
   color: var(--text);
   outline: none;
 }
 /* The project's engaged signature, as used by .step-division__mod. */
 .lfo__sync.is-active {
-  background: rgba(111, 184, 224, 0.16);
+  background: var(--accent-16);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1210,13 +1429,13 @@ input[type="range"]::-moz-range-thumb {
    boxes' overall heights already matched. Shrinking the icon closes that gap. */
 .lfo__map .icon { width: 16px; height: 16px; }
 .lfo__map:hover, .lfo__map:focus-visible {
-  background: rgba(111, 184, 224, 0.09);
-  border-color: rgba(111, 184, 224, 0.28);
+  background: var(--accent-09);
+  border-color: var(--accent-28);
   color: var(--text);
   outline: none;
 }
 .lfo__map.is-active {
-  background: rgba(111, 184, 224, 0.16);
+  background: var(--accent-16);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -1268,7 +1487,7 @@ input[type="range"]::-moz-range-thumb {
   transition: background-color 0.12s, color 0.12s;
 }
 .lfo__clear:hover, .lfo__clear:focus-visible {
-  background: rgba(111, 184, 224, 0.16);
+  background: var(--accent-16);
   color: var(--text);
   outline: none;
 }
@@ -1279,7 +1498,7 @@ input[type="range"]::-moz-range-thumb {
    engaged border, because this is an invitation to click rather than a state the
    control is in. */
 .is-mod-eligible {
-  outline: 1px dashed rgba(111, 184, 224, 0.55);
+  outline: 1px dashed var(--accent-55);
   outline-offset: 2px;
   border-radius: 4px;
   cursor: crosshair;

@@ -125,4 +125,9 @@ export class TrigLoopControl {
   #emit(key, value) {
     this.bus.emit('param:change', { trackId: this.trackId, key, value });
   }
+
+  /** Point this control at a different track -- see main.js's selectTrack(). */
+  setTrackId(trackId) {
+    this.trackId = trackId;
+  }
 }

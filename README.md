@@ -1,7 +1,7 @@
 # Web Generative Sequencer
 
-A generative Euclidean sequencer driving a modal string voice, built on the
-**Web Audio API**.
+Four generative Euclidean sequencers driving four modal string voices off one
+clock, built on the **Web Audio API**.
 
 > Zero build step, plain ES modules, no dependencies.
 
@@ -35,16 +35,21 @@ index.html
         │       └─ distributions.js     ← Stochastic distributions
         │
         ├─ audio/               ← Audio rendering
-        │   ├─ AudioEngine.js  ←   AudioContext & node graph
+        │   ├─ AudioEngine.js  ←   AudioContext, master limiter & fader
+        │   ├─ TrackVoice.js   ←   One track's string + granulator + trim
         │   ├─ modal/
         │   │   └─ modalModel.js ←  String physics (pure functions)
         │   └─ worklets/
         │       ├─ modal-processor.js    ← 16-voice resonator bank
-        │       └─ granulator-processor.js ← Live granulator + limiter
+        │       ├─ granulator-processor.js ← Live granulator + limiter
+        │       └─ master-clip-processor.js ← Limiter on the four-track sum
         │
         └─ ui/                  ← User interface
             ├─ UIController.js ←   Builds control surface from schema
             ├─ EuclidView.js   ←   Canvas Euclidean ring display
+            ├─ TrackTabs.js    ←   The four track pages + playhead bars
+            ├─ palette.js      ←   One colour scheme per page
+            ├─ playheadProgress.js ← Fractional playhead position (pure)
             ├─ icons.js        ←   Line-art SVG glyphs
             ├─ BiasSpreadSlider.js
             ├─ DragNumber.js
@@ -58,15 +63,57 @@ index.html
             └─ noteNames.js
 ```
 
+## Tracks
+
+Four tracks run in parallel off one clock. Each owns its own rhythm, pitch,
+velocity, LFO, string and granulator; what they share is the tempo, the master
+fader, and the moment they start.
+
+The tab strip above the columns switches which track's controls are on screen —
+and there is **one control surface, re-bound**, rather than four built and hidden.
+That keeps the DOM ids unique, keeps one canvas per view, and keeps the setter maps
+in `main.js` keyed by parameter alone. `selectTrack()` re-points every widget, fills
+them from the store, and repaints the ring.
+
+Since only one ring is visible, the three hidden tracks would otherwise give no sign
+of running, so each tab carries a groove that fills across one revolution of *that*
+track's pattern — interpolated within the step, because a bar that jumped one notch
+per step reads as broken at slow divisions. It is gated on the audio clock, not on
+the `step` event, for the same reason the ring is: steps are decided ~100 ms early.
+
+Every track is **muted by default**. "A track is silent unless something says
+otherwise" is what makes resetting a track to its defaults safe — four tracks
+booting audible would stack four copies of the same Euclid pattern at four times the
+level. `main.js` unmutes track 0 once, and a patch carries the rest.
+
+### Colour
+
+Each page has its own scheme, from [`src/ui/palette.js`](src/ui/palette.js). A page
+authors three colours — `accent`, the `alt` its random-pulse ring half contrasts
+against, and the `pulse` its Euclid half is filled with — and everything else
+derives. `applyPalette()` writes `--accent` onto `<html>`; the stylesheet derives
+every panel tint, border and active state from it with `color-mix()`, so one
+assignment retints the whole page.
+
+Two roles deliberately never vary: the green that means **it fired** / **the LFO
+reaches this far**, and the neutral whites that mean **absence**. Four greens would
+read as four different features, and absence has no hue.
+
+The canvases are handed the derived palette object rather than reading custom
+properties back out — `getComputedStyle` in a draw path forces layout every frame.
+
 ## Data Flow
 
 ```
 Core → Sequencer → AudioEngine
   │                     │
   └────── EventBus ─────┘
-         ↕     ↕
-       UI   EuclidView
+         ↕     ↕      ↕
+       UI  EuclidView  TrackTabs
 ```
+
+Every event on the bus carries a `trackId`, so nothing downstream of `main.js` has to
+know how many tracks exist.
 
 All layers communicate exclusively through **EventBus** — the sequencer never
 touches the audio engine, and neither has any direct DOM access.
@@ -161,8 +208,19 @@ Controls emit the first and subscribe to the second, applying it through a
 idempotent redraw rather than a feedback loop, and a preset can move every control
 on screen by doing nothing but writing to the store.
 
-`target` sets scope: `track` params are per-track, `voice` and `transport` are
-global.
+Two orthogonal fields decide what happens to a value, and conflating them was worth
+untangling:
+
+| Field | Question | Values |
+|---|---|---|
+| `target` | **who** receives it | `track` · `voice` · `modulation` · `transport` · `master` |
+| `scope` | **how many** copies exist | omitted = one per track · `global` = one, full stop |
+
+Only two parameters are `global`: `bpm` and `masterGain`. Everything else — including
+the LFO's own eight and the string and granulator settings — is per-track, which is
+what lets four pages hold four instruments. `ParamStore` is the only reader of
+`scope`; `Track`, `Scheduler`, `TrackVoice` and `Modulation` each take their defaults
+from `defaultsFor(<their target>)` and never need to know how many of them exist.
 
 ## Patches
 
@@ -181,7 +239,12 @@ once at startup:
 {
   "version": 1,
   "presets": [
-    { "name": "Default", "patch": { "version": 1, "seed": 424242, "global": {...}, "tracks": [{...}] } }
+    { "name": "Default", "patch": {
+        "version": 2,
+        "seeds": [424242, 424243, 424244, 424245],
+        "global": { "bpm": 120, "masterGain": 0.8 },
+        "tracks": [{...}, {...}, {...}, {...}]
+    } }
   ]
 }
 ```
@@ -194,10 +257,20 @@ regenerating fails the suite instead of silently shipping a stale patch.
 
 ### What a patch contains
 
-Every parameter, scoped the way `target` scopes them, **plus the RNG seed**. The
-seed is the part worth understanding: the generators are stochastic, so settings
-alone restore the same *instrument* but a different *performance*. With the seed, a
-patch replays note for note — which is why the RNG is seedable at all.
+Every parameter, scoped the way `scope` scopes them, **plus one RNG seed per track**.
+The seeds are the part worth understanding: the generators are stochastic, so
+settings alone restore the same *instrument* but a different *performance*. With
+them, a patch replays note for note — which is why the RNGs are seedable at all.
+
+One seed per track and not one shared: the four tracks draw from their own streams,
+because a shared `Rng` would couple four independent random walks into one. That
+shape change is what took `SNAPSHOT_VERSION` to 2; a version-1 patch's single scalar
+`seed` still loads, as track 0's.
+
+A track the snapshot says nothing about is **reset to its defaults** rather than left
+alone, so a patch fully determines what you hear instead of leaving three tracks
+playing whatever was last dialled in. That is only safe because silence is the
+default — an unmentioned track goes quiet rather than joining in.
 
 ### Loading
 
@@ -217,7 +290,7 @@ boots on the same defaults the shipped patch holds.
 Dial the instrument in, then from the devtools console:
 
 ```js
-__seq.presets.toJSON(__seq.store.snapshot(__seq.rng.seed))
+__seq.presets.toJSON(__seq.store.snapshot(__seq.rngs.map((r) => r.seed)))
 ```
 
 and paste the result into `presets/factory.json` as another
@@ -248,6 +321,23 @@ document-relative, so the site works unchanged under a project subpath like
 `/WebGenerativeSequencer/`.
 
 ## Physical model
+
+Each track gets its own chain, and they sum into one fader:
+
+```
+per track:  modal-processor → granulator-processor → trim (mute × level)
+                                                       ↓
+                          master-clip-processor → master gain → out
+```
+
+One `AudioContext` for all four — four would mean four hardware clocks with no way to
+align them. The master limiter is there because each granulator already bounds *its
+own* output to about ±1, so four of them summing can reach ±3.2 and hard-clip the
+device. It reuses the granulator's exact soft-knee curve rather than introducing a
+character of its own, and that curve is **exact identity below 0.8** — which is where
+one track at the default level peaks, so a single-track patch passes through
+untouched. A `DynamicsCompressorNode` with a threshold low enough to catch four
+tracks would have engaged on the plucks of one.
 
 The string voice is additive-modal: one two-pole resonator per mode, struck by a
 shaped impulse. Mode tables are derived on the main thread
@@ -299,13 +389,23 @@ npm run serve    # Python HTTP server on port 8080
 ## Test
 
 ```bash
-npm test         # Node native test runner, 141 tests, no dependencies
+npm test         # Node native test runner, 233 tests, no dependencies
 ```
 
 The custom controls need a DOM, so they are checked by mounted pages rather than in Node.
-Serve the project root and open `/test/browser/trigger-controls-check.html` (the rhythm
-glyphs) or `/test/browser/glide-control-check.html`; each prints its results and stops on
-`ALL CHECKS DONE`.
+Serve the project root and open any of `/test/browser/*-check.html` — the rhythm glyphs,
+the LFO panel, the track tabs, the ring's loop overlay, and so on. Each prints its
+results and stops on `ALL CHECKS DONE`.
+
+Two things in the multi-track work are deliberately Node-testable rather than
+browser-only, because they are where the off-by-ones live:
+[`playheadProgress.js`](src/ui/playheadProgress.js) (the tab bars' position) and
+[`palette.js`](src/ui/palette.js) (every page's colours). `test/palette.test.js` also
+reads `styles/main.css` back, so the base colours the canvases derive from cannot
+drift from the ones the stylesheet declares, and a hand-written accent creeping back
+into a rule fails the suite. `test/masterClip.test.js` lifts `softClip` out of both
+worklets' source text and asserts the two copies are identical — the worklets cannot
+import a shared module, so the duplication is checked rather than trusted.
 
 ## Types
 

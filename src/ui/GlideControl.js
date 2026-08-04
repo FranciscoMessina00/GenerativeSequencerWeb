@@ -83,6 +83,11 @@ export class GlideControl {
     }
   }
 
+  /** Point this control at a different track -- see main.js's selectTrack(). */
+  setTrackId(trackId) {
+    this.trackId = trackId;
+  }
+
   #renderIcon() {
     this.modeButton.replaceChildren(buildModeIcon(this.exponential));
   }

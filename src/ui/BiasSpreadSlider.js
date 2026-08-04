@@ -257,6 +257,11 @@ export class BiasSpreadSlider {
     this.modRangeEl.style.width = `${Math.max(0, hiFrac - loFrac) * 100}%`;
   }
 
+  /** Point this control at a different track -- see main.js's selectTrack(). */
+  setTrackId(trackId) {
+    this.trackId = trackId;
+  }
+
   #emitBias() {
     this.bus.emit('param:change', { trackId: this.trackId, key: this.biasSpec.key, value: this.bias });
   }

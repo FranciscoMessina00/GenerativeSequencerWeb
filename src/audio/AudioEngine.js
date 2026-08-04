@@ -1,22 +1,29 @@
-import { buildNote, midiToHz, modeGains } from './modal/modalModel.js';
+import { TrackVoice } from './TrackVoice.js';
 import { clampParam, defaultsFor } from '../core/paramSchema.js';
 
 /**
- * Owns the AudioContext and node graph, and turns step events into note-ons.
+ * Owns the AudioContext and everything the tracks share, and hands each step to
+ * the track that produced it.
  *
- * Graph:  modal-processor -> granulator-processor -> [FX insert] -> master -> out
+ * Graph:  N x TrackVoice -> master clip -> master gain -> out
  *
- * Physics happens here on the main thread and the worklets receive finished mode
- * tables, so the model stays in one testable place and a note-on is a few hundred
- * bytes rather than a parameter negotiation.
+ * What is shared and what is not was a deliberate cut. Shared: one context (four
+ * would mean four hardware clocks with no way to align them), one limiter, one
+ * fader. Per track: the string and the granulator, because that is what makes a
+ * page sound like its own instrument -- see TrackVoice.js.
+ *
+ * The master limiter exists because four already-limited tracks still sum past
+ * full scale; it is exact identity for one track at the default level, so it
+ * changes nothing about how existing patches sound. See master-clip-processor.js.
  */
 export class AudioEngine {
-  constructor(bus) {
+  constructor(bus, { trackCount = 1 } = {}) {
     this.bus = bus;
-    this.params = defaultsFor('voice');
+    this.master = defaultsFor('master');
+    /** One chain per track, holding params from the start and nodes from init(). */
+    this.voices = Array.from({ length: trackCount }, (_, i) => new TrackVoice(i));
     this.context = null;
-    this.modalNode = null;
-    this.granulatorNode = null;
+    this.masterClip = null;
     this.masterGain = null;
     this.ready = false;
   }
@@ -33,34 +40,32 @@ export class AudioEngine {
     const Ctor = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
     this.context = new Ctor({ latencyHint: 'interactive' });
 
+    // Per context, not per node: every TrackVoice instantiates the same two
+    // processors, so registering them once here is all four of them need.
     await Promise.all([
       this.context.audioWorklet.addModule('./src/audio/worklets/modal-processor.js'),
       this.context.audioWorklet.addModule('./src/audio/worklets/granulator-processor.js'),
+      this.context.audioWorklet.addModule('./src/audio/worklets/master-clip-processor.js'),
     ]);
 
-    // Mono throughout; the destination node up-mixes to stereo.
-    this.modalNode = new AudioWorkletNode(this.context, 'modal-processor', {
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      outputChannelCount: [1],
-    });
-
-    this.granulatorNode = new AudioWorkletNode(this.context, 'granulator-processor', {
+    this.masterClip = new AudioWorkletNode(this.context, 'master-clip-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [1],
     });
 
     this.masterGain = this.context.createGain();
-    this.masterGain.gain.value = this.params.masterGain;
+    this.masterGain.gain.value = this.master.masterGain;
 
-    // An FX insert would go between the granulator and the master gain; nothing
-    // else needs to move to add one.
-    this.modalNode.connect(this.granulatorNode);
-    this.granulatorNode.connect(this.masterGain);
+    // A global FX insert would go between the clip and the master gain.
+    this.masterClip.connect(this.masterGain);
     this.masterGain.connect(this.context.destination);
 
-    this.#pushVoiceParams();
+    // The tracks sum by fanning into the limiter's single input.
+    for (const voice of this.voices) {
+      voice.attach({ context: this.context, destination: this.masterClip });
+    }
+
     this.ready = true;
   }
 
@@ -72,95 +77,33 @@ export class AudioEngine {
     return this.context ? this.context.currentTime : 0;
   }
 
-  setParam(key, value) {
-    if (!(key in this.params)) return;
-    this.params[key] = clampParam(key, value);
+  /** Route a `target: 'voice'` param to the one track that owns it. */
+  setVoiceParam(key, value, trackId) {
+    this.voices[trackId]?.setParam(key, value);
+  }
+
+  /** Route a `target: 'master'` param, which belongs to no single track. */
+  setMasterParam(key, value) {
+    if (!(key in this.master)) return;
+    this.master[key] = clampParam(key, value);
     if (!this.ready) return;
 
     if (key === 'masterGain') {
       // Short ramp rather than a jump, so dragging the fader does not click.
-      this.masterGain.gain.setTargetAtTime(this.params.masterGain, this.currentTime, 0.01);
-    } else if (key === 'grainPitch' || key === 'grainDryWet') {
-      this.#pushGranulatorParams();
+      this.masterGain.gain.setTargetAtTime(this.master.masterGain, this.currentTime, 0.01);
     }
-    // The remaining voice params (modes, stiffness, decay, damping, softness) are
-    // read when the next note is built, so they need no message.
   }
 
-  #pushVoiceParams() {
-    this.#pushGranulatorParams();
-    this.masterGain.gain.value = this.params.masterGain;
-  }
-
-  #pushGranulatorParams() {
-    const t = this.currentTime;
-    this.granulatorNode.parameters.get('grainPitch').setTargetAtTime(this.params.grainPitch, t, 0.01);
-    this.granulatorNode.parameters.get('dryWet').setTargetAtTime(this.params.grainDryWet, t, 0.01);
+  /** Sound one step, on whichever track decided it. */
+  noteOn(step) {
+    this.voices[step.trackId]?.noteOn(step);
   }
 
   /**
-   * Sound one step.
-   *
-   * The step carries the note it decided on plus the note before it, because both
-   * glides in this instrument ramp *from the previous value into the current one*
-   * across the step.
-   *
-   * Note on per-track timbre, should a second track ever want its own string: the
-   * mode tables below are already built per note from explicit arguments, so this
-   * method only needs `this.params` to become a per-track lookup on `step.trackId`.
-   * The work is not here -- it is in the schema, where `modes`/`stiffness`/`decay`/
-   * `damping`/`pluckSoftness` would have to move from global to per-track scope,
-   * while `grainPitch`/`grainDryWet`/`masterGain` must stay global because there is
-   * one granulator and one fader. The 16-voice pool in the worklet stays shared
-   * either way; a global polyphony budget is the behaviour you want.
+   * Silence every ringing voice on every track -- used when the transport stops.
+   * Each track has its own 16-voice pool, so this has to reach all of them.
    */
-  noteOn(step) {
-    if (!this.ready || !step.triggered) return;
-
-    const p = this.params;
-    const note = buildNote({
-      midinote: step.note,
-      velocity: step.velocity,
-      pluckPosition: step.mod,
-      modes: p.modes,
-      stiffness: p.stiffness,
-      damping: p.damping,
-      decayScale: p.decay,
-      sampleRate: this.context.sampleRate,
-    });
-
-    // Gains at both ends of the plucking-position ramp. With no ramp the two are
-    // identical and the worklet's blend is a no-op.
-    const gainsTo = note.gains;
-    const gainsFrom =
-      step.modTime > 0 ? modeGains(note.count, step.prevMod) : gainsTo;
-
-    this.modalNode.port.postMessage({
-      type: 'noteOn',
-      startTime: step.audioTime,
-      count: note.count,
-      ratios: note.ratios,
-      decays: note.decays,
-      gainsFrom,
-      gainsTo,
-
-      f0From: step.glideTime > 0 ? midiToHz(step.prevNote) : midiToHz(step.note),
-      f0To: midiToHz(step.note),
-      glideTime: step.glideTime,
-      glideExponential: step.glideExponential,
-
-      mFrom: step.prevMod,
-      mTo: step.mod,
-      modTime: step.modTime,
-      modExponential: step.modExponential,
-
-      velocity: step.velocity,
-      pluckSoftness: p.pluckSoftness,
-    });
-  }
-
-  /** Silence every ringing voice -- used when the transport stops. */
   panic() {
-    this.modalNode?.port.postMessage({ type: 'panic' });
+    for (const voice of this.voices) voice.panic();
   }
 }

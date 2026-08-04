@@ -6,9 +6,11 @@
 <html>
 <head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
 <style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
-/* Overrides the fixed positioning so the bar sits in the flow here, and pins a
-   narrow lane so a known-length string is guaranteed to overrun it. */
-#infobar{position:static;width:260px;}</style>
+/* Overrides the fixed positioning so the bar sits in the flow here, and pins a lane
+   narrow enough that the longest real description is guaranteed to overrun it while
+   the shortest still fits. Both margins are asserted below rather than assumed, so
+   this width and the copy cannot drift apart silently. */
+#infobar{position:static;width:420px;}</style>
 </head>
 <body>
 <footer class="infobar" id="infobar"></footer>
@@ -64,12 +66,26 @@ bar.show('bpm alsoNope');
 check('a partial match keeps just what resolved', shown(), INFO_TEXT.bpm);
 
 log('\n-- the marquee engages only on overrun --');
-// The lane is 260px wide minus the bar's 18px of padding either side; "BPM — tempo,
-// in beats per minute." fits, the pluck-position sentence does not.
-bar.show('bpm');
+// Two real entries stand in for "fits the lane" and "does not": the shortest
+// description in the file and one of the longest. They are chosen for their LENGTH
+// rather than their subject, so the preconditions are measured against the lane
+// rather than assumed -- editing either one's copy past the threshold would
+// otherwise fail below with no hint as to why.
+const SHORT = 'presetSlots';
+const LONG = 'modBias';
+const laneWidth = () => bar.textEl.parentElement.clientWidth;
+const textWidth = (id) => {
+  bar.show(id);
+  return bar.textEl.scrollWidth;
+};
+check(`${SHORT} fits the lane with room to spare`, textWidth(SHORT) < laneWidth() - 20, true);
+check(`${LONG} overruns it with room to spare`, textWidth(LONG) > laneWidth() + 20, true);
+bar.showHint();
+
+bar.show(SHORT);
 check('short text does not scroll', marqueeing(), 'false');
 check('...and carries no shift', shift(), '');
-bar.show('modBias');
+bar.show(LONG);
 check('long text scrolls', marqueeing(), 'true');
 check('shift is negative (it travels left)', Number.parseFloat(shift()) < 0, true);
 check('shift is a plain px value a test can read', /^-\d+px$/.test(shift()), true);
@@ -84,20 +100,20 @@ log('\n-- showing the same text again must not restart the scroll --');
 // and every pointerover across a control's children would restart the scroll.
 const shiftBefore = shift();
 textEl.classList.remove('is-marquee');
-bar.show('modBias');
+bar.show(LONG);
 check('unchanged text is not re-applied', marqueeing(), 'false');
 check('...and its shift is left exactly as it was', shift(), shiftBefore);
 // A different value that resolves to the *same* text must also be a no-op, since
-// the guard compares text and not ids -- 'modBias nope' resolves to just modBias.
-bar.show('modBias nope');
+// the guard compares text and not ids -- `${LONG} nope` resolves to just modBias.
+bar.show(`${LONG} nope`);
 check('a different value resolving to the same text is also a no-op', marqueeing(), 'false');
 // Put it back the way the rest of the checks expect to find it.
 bar.showHint();
-bar.show('modBias');
+bar.show(LONG);
 check('and it re-engages once the text has genuinely changed', marqueeing(), 'true');
 
 log('\n-- switching away clears the marquee state --');
-bar.show('bpm');
+bar.show(SHORT);
 check('back to short text, no scroll', marqueeing(), 'false');
 check('...and the shift is removed, not left stale', shift(), '');
 
