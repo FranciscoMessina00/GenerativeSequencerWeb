@@ -1,12 +1,17 @@
 <!doctype html>
 <!-- Manual check for the LFO panel: the eight keys it owns, setValue not echoing, the
-     sync toggle swapping which rate control is shown, the shape readout naming the
-     nearest anchor, and the scope's curve and dot following shape/fold/phase. Browser-
-     only because it needs a real canvas measured by CSS. -->
+     sync toggle swapping which rate control is shown (now an icon-only button, with
+     the division control resized to match the rate control's compact sizing), the
+     shape readout naming the nearest anchor, the clear button's visibility and
+     unmap behaviour, and the scope's static curve following shape/fold. targetRow is
+     a separate element from panel.element (it is meant to sit next to the group's
+     "Modulation" heading, not inside the panel -- see main.js), so it is mounted
+     alongside the panel here rather than assumed to be one of its children.
+     Browser-only because it needs a real canvas measured by CSS. -->
 <html>
 <head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
 <style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
-/* Fixed width so the scope's measured rect -- and therefore the dot's x -- is deterministic. */
+/* Fixed width so the scope's measured rect is deterministic. */
 #mount{width:240px;}</style>
 </head>
 <body>
@@ -45,13 +50,9 @@ const specs = {
   targetSpec: { key: 'lfoTarget', label: 'LFO Target', min: 0, max: 12, step: 1, def: 0 },
 };
 
-// A plain mutable phase stands in for the clock, and frame() is called by hand --
-// deterministic, and independent of LfoView's perpetually-rescheduling RAF chain.
-let phase = 0;
 let mapRequests = 0;
 const panel = new LfoPanel({
   bus, trackId: 0, ...specs,
-  getPhase: () => phase,
   onMapRequest: () => { mapRequests += 1; },
 });
 const view = panel.view;
@@ -66,7 +67,7 @@ const MARGIN_Y = 5;
 log('-- it measures itself, with no resize() handed to it --');
 check('zero-sized before insertion', `${view.cssWidth}x${view.cssHeight}`, '0x0');
 check('drawing at zero size is a safe no-op', (() => { view.draw(); return 'ok'; })(), 'ok');
-document.getElementById('mount').appendChild(panel.element);
+document.getElementById('mount').append(panel.element, panel.targetRow);
 await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
 log('\n-- the keys it owns --');
@@ -101,6 +102,8 @@ check('synced: the Hz number is really gone', shown(panel.rateControl.element), 
 check('synced: the division cluster is visible', shown(panel.divisionControl.element), 'true');
 check('never both at once', shown(panel.rateControl.element) !== shown(panel.divisionControl.element), 'true');
 check('the sync button lights', panel.element.querySelector('.lfo__sync').classList.contains('is-active'), 'true');
+check('the sync button is icon-only, no text caption', panel.element.querySelector('.lfo__sync').textContent, '');
+check('the division number is now compact, matching the rate number', panel.divisionControl.divisionControl.element.classList.contains('dragnum--compact'), 'true');
 
 log('\n-- clicking sync emits, and only once --');
 events.length = 0;
@@ -116,9 +119,28 @@ check('...and the readout followed', panel.divisionControl.divisionControl.value
 
 log('\n-- the target readout names the destination --');
 panel.setValue('lfoTarget', 0);
-check('unmapped', panel.element.querySelector('.lfo__target').textContent, 'Not mapped');
+check('unmapped', panel.targetRow.querySelector('.lfo__target').textContent, 'Not mapped');
 panel.setValue('lfoTarget', MOD_TARGETS.indexOf('grainDryWet'));
-check('mapped names the param', panel.element.querySelector('.lfo__target').textContent, '→ Grain Dry/Wet');
+check('mapped names the param', panel.targetRow.querySelector('.lfo__target').textContent, '→ Grain Dry/Wet');
+
+log('\n-- the clear button unmaps directly, and only shows when there is something to clear --');
+panel.setValue('lfoTarget', 0);
+check('hidden while unmapped', panel.clearButton.hidden, 'true');
+panel.setValue('lfoTarget', MOD_TARGETS.indexOf('grainDryWet'));
+check('visible once mapped', panel.clearButton.hidden, 'false');
+panel.setAssigning(true);
+check('hidden again while mid-pick, even though still mapped', panel.clearButton.hidden, 'true');
+panel.setAssigning(false);
+check('visible again once assigning ends', panel.clearButton.hidden, 'false');
+
+events.length = 0;
+panel.clearButton.click();
+check('clicking emits lfoTarget back to unmapped', emitted(), 'lfoTarget=0');
+panel.setValue('lfoTarget', 0); // the store's own committed response, same as any other control
+check('once committed, the readout reflects it', panel.targetRow.querySelector('.lfo__target').textContent, 'Not mapped');
+check('...and the button hides again', panel.clearButton.hidden, 'true');
+
+panel.setValue('lfoTarget', MOD_TARGETS.indexOf('grainDryWet')); // restored for the sections below
 
 log('\n-- the map button reports out rather than acting alone --');
 check('no requests yet', mapRequests, 0);
@@ -126,9 +148,9 @@ panel.element.querySelector('.lfo__map').click();
 check('a click asks the page to start assigning', mapRequests, 1);
 panel.setAssigning(true);
 check('the button lights while armed', panel.element.querySelector('.lfo__map').classList.contains('is-active'), 'true');
-check('and the readout prompts', panel.element.querySelector('.lfo__target').textContent, 'Pick a control…');
+check('and the readout prompts', panel.targetRow.querySelector('.lfo__target').textContent, 'Pick a control…');
 panel.setAssigning(false);
-check('unarming restores the target name', panel.element.querySelector('.lfo__target').textContent, '→ Grain Dry/Wet');
+check('unarming restores the target name', panel.targetRow.querySelector('.lfo__target').textContent, '→ Grain Dry/Wet');
 
 // ---------------------------------------------------------------------------
 // The scope
@@ -156,35 +178,6 @@ panel.setValue('lfoFold', 0);
 check('an unfolded sine peaks near the top', Math.round(yFor(0.25)), Math.round(view.cssHeight / 2 - (view.cssHeight / 2 - 5)));
 panel.setValue('lfoFold', 1);
 check('fully folded, that same peak sits on the centre line', Math.round(yFor(0.25)), Math.round(view.cssHeight / 2));
-
-log('\n-- the marker follows the clock only while running --');
-view.setRunning(false);
-phase = 0.42;
-view.frame();
-check('stopped: phase is not read', view.phase, 0);
-view.setRunning(true);
-view.frame();
-check('running: phase follows the clock', view.phase, 0.42);
-phase = 0.77;
-view.frame();
-check('...and keeps following', view.phase, 0.77);
-check('a running scope repaints every frame', view.dirty, 'false');
-
-log('\n-- the marker has a real position, running or not --');
-panel.setValue('lfoShape', 0);
-panel.setValue('lfoFold', 0);
-const at = (p) => { phase = p; view.frame(); return view.markerPoint(); };
-const quarter = at(0.25);
-check('a quarter through sits a quarter across', Math.round(quarter.x), Math.round(view.cssWidth * 0.25));
-check('...and rides the curve to its peak', Math.round(quarter.y), MARGIN_Y);
-const threeQuarter = at(0.75);
-check('three quarters through sits three quarters across', Math.round(threeQuarter.x), Math.round(view.cssWidth * 0.75));
-check('...and at the trough', Math.round(threeQuarter.y), Math.round(view.cssHeight - MARGIN_Y));
-// Parked, not hidden: stopping must leave a drawable position behind.
-view.setRunning(false);
-const parked = view.markerPoint();
-check('stopping parks it rather than losing it', Number.isFinite(parked.x) && Number.isFinite(parked.y), 'true');
-check('...at the phase it had reached', Math.round(parked.x), Math.round(threeQuarter.x));
 
 // ---------------------------------------------------------------------------
 // Layout: nothing spills out of the panel

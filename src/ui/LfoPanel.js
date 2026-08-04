@@ -37,6 +37,21 @@ function buildMapIcon() {
   return svg;
 }
 
+/**
+ * The Sync button's glyph: a metronome, case and pendulum arm -- built here for the
+ * same reason buildMapIcon() is: it means nothing outside the LFO.
+ */
+function buildSyncIcon() {
+  const svg = svgEl('svg', { viewBox: '0 0 24 24', class: 'icon' });
+  svg.append(
+    svgEl('path', { d: 'M7 20 L10 5 H14 L17 20 Z' }), // the case
+    svgEl('path', { d: 'M4 20 H20' }), // the base
+    svgEl('path', { d: 'M12 19 L16.5 4' }), // the pendulum arm
+    svgEl('circle', { cx: 15, cy: 10.5, r: 1.4, class: 'icon__dot' }), // the weight
+  );
+  return svg;
+}
+
 export class LfoPanel {
   /**
    * @param {object} opts
@@ -50,12 +65,11 @@ export class LfoPanel {
    * @param {object} opts.foldSpec     how far the peaks fold back
    * @param {object} opts.amountSpec   depth
    * @param {object} opts.targetSpec   index into MOD_TARGETS
-   * @param {() => number} opts.getPhase phase being heard, for the scope's dot
    * @param {() => void} opts.onMapRequest the Map button was pressed
    */
   constructor({
     bus, trackId = 0, shapeSpec, rateSpec, syncSpec, divisionSpec, syncModSpec,
-    foldSpec, amountSpec, targetSpec, getPhase, onMapRequest,
+    foldSpec, amountSpec, targetSpec, onMapRequest,
   }) {
     this.bus = bus;
     this.trackId = trackId;
@@ -75,13 +89,17 @@ export class LfoPanel {
     root.className = 'lfo';
 
     root.append(
-      this.#buildScope(getPhase),
+      this.#buildScope(),
       this.#buildShapeRow(),
-      this.#buildRateRow(),
-      this.#buildDepthRow(),
-      this.#buildTargetReadout(),
+      this.#buildControlGrid(),
     );
     this.element = root;
+
+    // Built, but deliberately not appended here: it sits next to the "Modulation"
+    // heading instead, on the group's own <h2>, not inside the panel -- see
+    // main.js's ui.renderGroups() call (headingExtra) and #buildTargetReadout()'s
+    // own comment for why.
+    this.targetRow = this.#buildTargetReadout();
 
     this.#renderSyncState();
     this.#renderTarget();
@@ -131,12 +149,7 @@ export class LfoPanel {
     this.#renderTarget();
   }
 
-  /** Freeze or animate the scope's dot along with the transport. */
-  setRunning(running) {
-    this.view.setRunning(running);
-  }
-
-  #buildScope(getPhase) {
+  #buildScope() {
     const wrap = document.createElement('div');
     wrap.className = 'lfo__scope';
     wrap.dataset.info = 'lfoScope';
@@ -151,7 +164,7 @@ export class LfoPanel {
     // being appended to the panel changes that. LfoView carries a ResizeObserver for
     // exactly this reason: it fires once the panel reaches the document and the
     // canvas has a real size. Nothing here needs to call resize().
-    this.view = new LfoView({ canvas, getPhase });
+    this.view = new LfoView({ canvas });
     return wrap;
   }
 
@@ -193,18 +206,28 @@ export class LfoPanel {
   }
 
   /**
-   * Free rate and synced division are the same setting expressed two ways, so only one
-   * is shown at a time -- two visible rate controls would leave it ambiguous which one
-   * the LFO is actually following.
+   * The four remaining controls, on a 2x2 grid: Fold | Rate (with Sync) above,
+   * Amount | Map below -- the same layout idiom EuclidView's hub uses for its own
+   * four stats. Rate and Sync are one grid cell, not two: Sync just says which of
+   * Rate's two faces (free Hz or synced division) is showing, so it moves as part
+   * of that control -- trailing after the number, since this cell sits in the
+   * grid's right column -- rather than getting a quarter of the grid to itself.
+   *
+   * Free rate and synced division are the same setting expressed two ways, so only
+   * one is ever shown -- two visible rate controls would leave it ambiguous which
+   * one the LFO is actually following.
    */
-  #buildRateRow() {
-    const row = document.createElement('div');
-    row.className = 'lfo__row lfo__row--rate';
+  #buildControlGrid() {
+    const grid = document.createElement('div');
+    grid.className = 'lfo__grid';
+
+    const rateGroup = document.createElement('div');
+    rateGroup.className = 'lfo__rate-group';
 
     this.syncButton = document.createElement('button');
     this.syncButton.type = 'button';
     this.syncButton.className = 'lfo__sync';
-    this.syncButton.textContent = 'Sync';
+    this.syncButton.append(buildSyncIcon());
     this.syncButton.setAttribute('aria-label', this.specs.sync.label);
     this.syncButton.dataset.info = this.specs.sync.key;
     this.syncButton.addEventListener('click', () => {
@@ -226,15 +249,13 @@ export class LfoPanel {
       trackId: this.trackId,
       divisionSpec: this.specs.division,
       modSpec: this.specs.syncMod,
+      // Matches the rate control's own compact sizing above -- without this the
+      // division's drag-number renders at the default, much larger size, so
+      // toggling Sync visibly resized the row.
+      compact: true,
     });
 
-    row.append(this.syncButton, this.rateControl.element, this.divisionControl.element);
-    return row;
-  }
-
-  #buildDepthRow() {
-    const row = document.createElement('div');
-    row.className = 'lfo__row lfo__row--depth';
+    rateGroup.append(this.rateControl.element, this.divisionControl.element, this.syncButton);
 
     this.foldControl = new DragNumber({
       spec: this.specs.fold,
@@ -265,14 +286,40 @@ export class LfoPanel {
     this.mapButton.append(buildMapIcon(), caption);
     this.mapButton.addEventListener('click', () => this.onMapRequest?.());
 
-    row.append(this.foldControl.element, this.amountControl.element, this.mapButton);
-    return row;
+    // DOM order is the grid order: fold and amount land in the left column (odd
+    // positions), rateGroup and map in the right (even) -- see the CSS, which mirrors
+    // .hub's own odd/even mirrored alignment so both columns hug the centre gutter.
+    grid.append(this.foldControl.element, rateGroup, this.amountControl.element, this.mapButton);
+    return grid;
   }
 
+  /**
+   * The name of whatever the LFO is pointed at, plus a button to clear it. Returned
+   * for the caller to place -- see targetRow in the constructor -- rather than
+   * appended here, since it lives beside the "Modulation" heading, not inside this
+   * panel.
+   */
   #buildTargetReadout() {
-    this.targetEl = document.createElement('div');
+    const row = document.createElement('div');
+    row.className = 'lfo__target-row';
+
+    this.targetEl = document.createElement('span');
     this.targetEl.className = 'lfo__target';
-    return this.targetEl;
+
+    this.clearButton = document.createElement('button');
+    this.clearButton.type = 'button';
+    this.clearButton.className = 'lfo__clear';
+    this.clearButton.textContent = '×';
+    this.clearButton.setAttribute('aria-label', 'Clear the LFO mapping');
+    this.clearButton.dataset.info = 'lfoClear';
+    // Index 0 is MOD_TARGETS[0] === null, "not mapped" -- the same value the page's
+    // own assign-mode click handler writes when binding a target (main.js), just
+    // hardcoded here since there is nothing to map an id through in the other
+    // direction.
+    this.clearButton.addEventListener('click', () => this.#emit(this.specs.target.key, 0));
+
+    row.append(this.targetEl, this.clearButton);
+    return row;
   }
 
   #renderShape() {
@@ -293,6 +340,7 @@ export class LfoPanel {
     if (this.assigning) {
       this.targetEl.textContent = 'Pick a control…';
       this.targetEl.classList.add('is-assigning');
+      this.clearButton.hidden = true;
       return;
     }
     this.targetEl.classList.remove('is-assigning');
@@ -300,6 +348,8 @@ export class LfoPanel {
     const spec = key ? paramSpec(key) : null;
     this.targetEl.textContent = spec ? `→ ${spec.label}` : 'Not mapped';
     this.targetEl.classList.toggle('is-unmapped', !spec);
+    // Nothing to clear when there is no mapping, and mid-pick is handled above.
+    this.clearButton.hidden = !spec;
   }
 
   #emit(key, value) {

@@ -1,7 +1,8 @@
 <!doctype html>
 <!-- Manual check for the rhythm row's three icon controls: the cycling logic gate, the
      drag-to-fill dice, and the loop cluster whose toggle dims the permutation -- plus
-     the permutation-less variant of the loop cluster that Velocity uses. -->
+     the permutation-less variant of the loop cluster that Velocity uses. Also covers
+     the dice's setModRange(), the LFO's sweep-range line and dot. -->
 <html>
 <head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
 <style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
@@ -126,6 +127,35 @@ check('setValue never emits', emitted(), '');
 const baseBox = prob.element.querySelector('.fillicon__base').getBoundingClientRect();
 const fillBox = fillEl.getBoundingClientRect();
 check('layers share an origin', `${Math.round(baseBox.x - fillBox.x)},${Math.round(baseBox.y - fillBox.y)}`, '0,0');
+
+// ---------------------------------------------------------------------------
+// Fill icon: the LFO's sweep range, drawn beside the glyph
+// ---------------------------------------------------------------------------
+log('\n-- mod range --');
+const modRangeEl = prob.element.querySelector('.fillicon__modrange');
+const modDotEl = prob.element.querySelector('.fillicon__moddot');
+const hasModRange = () => prob.element.classList.contains('has-mod-range');
+// Unlike --fill-top (a custom property, stored verbatim as a string), `top`/`height`
+// are typed CSS <percentage>s that Blink re-serializes at reduced precision --
+// "25%" rather than the "25.00%" that was assigned. Parse back to a number instead
+// of comparing the raw string.
+const pct = (styleValue) => parseFloat(styleValue);
+
+check('hidden until a range is set', hasModRange(), 'false');
+
+prob.setModRange({ lo: 0.25, hi: 0.75, base: 0.5 });
+check('setting a range shows it', hasModRange(), 'true');
+check('the top is the high end, inverted like --fill-top', pct(modRangeEl.style.top), 25);
+check('the height spans down to the low end', pct(modRangeEl.style.height), 50);
+check('the dot sits at the base', pct(modDotEl.style.top), 50);
+
+prob.setModRange(null);
+check('clearing hides it again', hasModRange(), 'false');
+
+prob.setModRange({ lo: 0, hi: 1, base: 0 });
+check('touching both extremes spans the whole glyph', `${pct(modRangeEl.style.top)},${pct(modRangeEl.style.height)}`, '0,100');
+check('a base at the minimum sits at the very bottom', pct(modDotEl.style.top), 100);
+prob.setModRange(null);
 
 log('\n-- caption/value peek --');
 const captionText = () => prob.element.querySelector('.fillicon__label').textContent;

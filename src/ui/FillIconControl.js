@@ -68,7 +68,17 @@ export class FillIconControl {
     base.classList.add('fillicon__base');
     this.fillEl = buildIcon();
     this.fillEl.classList.add('fillicon__fill');
-    glyph.append(base, this.fillEl);
+
+    // The LFO's reach, when this is its target -- a line beside the glyph rather
+    // than on it, since the glyph's own fill already means "value" and a second
+    // thing changing the same 24px would just be noise. Hidden by default; see
+    // setModRange().
+    this.modRangeEl = document.createElement('span');
+    this.modRangeEl.className = 'fillicon__modrange';
+    this.modDotEl = document.createElement('span');
+    this.modDotEl.className = 'fillicon__moddot';
+
+    glyph.append(base, this.fillEl, this.modRangeEl, this.modDotEl);
 
     this.labelEl = document.createElement('span');
     this.labelEl.className = 'fillicon__label';
@@ -107,9 +117,14 @@ export class FillIconControl {
 
   /** Where the value sits in its range, 0..1. */
   #fraction() {
+    return this.#fractionOf(this.value);
+  }
+
+  /** Where an arbitrary value sits in this control's range, 0..1 -- for setModRange. */
+  #fractionOf(value) {
     const range = this.spec.max - this.spec.min;
     if (range <= 0) return 0;
-    return (this.value - this.spec.min) / range;
+    return (value - this.spec.min) / range;
   }
 
   /** Hovering or mid-drag: close enough to be looking for the number, not the name. */
@@ -135,6 +150,28 @@ export class FillIconControl {
   setValue(next) {
     this.value = quantize(next, this.spec.min, this.spec.max, this.spec.step);
     this.#render();
+  }
+
+  /**
+   * The LFO's sweep, drawn as a line beside the glyph with a dot at the base
+   * value it is centred on -- `range` is `{ lo, hi, base }` in this param's own
+   * units, from modulation/modRange.js, or null to clear it when this control
+   * stops being the target (or the depth drops to zero).
+   *
+   * Static: called only when the mapping, the depth, or the base value itself
+   * changes, never on a timer -- there is no live phase to track here.
+   */
+  setModRange(range) {
+    this.element.classList.toggle('has-mod-range', Boolean(range));
+    if (!range) return;
+    // Top offsets, not heights, since the line's own top edge is its high end --
+    // the same inverted convention `--fill-top` already uses.
+    const hiTop = (1 - this.#fractionOf(range.hi)) * 100;
+    const loTop = (1 - this.#fractionOf(range.lo)) * 100;
+    const baseTop = (1 - this.#fractionOf(range.base)) * 100;
+    this.modRangeEl.style.top = `${hiTop.toFixed(2)}%`;
+    this.modRangeEl.style.height = `${Math.max(0, loTop - hiTop).toFixed(2)}%`;
+    this.modDotEl.style.top = `${baseTop.toFixed(2)}%`;
   }
 
   /**

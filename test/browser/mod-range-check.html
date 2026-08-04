@@ -1,0 +1,119 @@
+<!doctype html>
+<!-- Manual check for the LFO's sweep-range indicator on the two widget types that
+     have no other browser coverage: UIController's plain <input type=range> controls
+     (tick marks at the range's edges) and BiasSpreadSlider's drag-track (a green line
+     shifted above the existing rail/band/handle lane). FillIconControl's own version
+     of this is covered in trigger-controls-check.html instead, alongside its everyday
+     behaviour. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+#mount{width:300px;}</style>
+</head>
+<body>
+<div id="mount"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { UIController } from '../../src/ui/UIController.js';
+import { BiasSpreadSlider } from '../../src/ui/BiasSpreadSlider.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const bus = new EventBus();
+
+/**
+ * A real `left`/`width`/`top` is a typed CSS `<percentage>`, not a plain string
+ * like the custom properties FillIconControl uses -- Blink re-serializes it at
+ * reduced precision (float32-ish) when read back, so an exact string compare
+ * against a float64 JS computation flakes on the last few digits. Round both
+ * sides the same way instead, same idea as lfo-check.html's Math.round(yFor(...)).
+ */
+const pct = (styleValue) => parseFloat(styleValue).toFixed(2);
+
+// ---------------------------------------------------------------------------
+// UIController: tick marks on a plain slider
+// ---------------------------------------------------------------------------
+log('-- plain slider ticks --');
+const ui = new UIController({ bus, trackId: 0 });
+const uiMount = document.createElement('div');
+document.getElementById('mount').appendChild(uiMount);
+// The real schema, not a mirrored spec -- renderGroups reads PARAM_SCHEMA directly,
+// and grainPitch/grainDryWet are both plain sliders with no toggle/bias-spread
+// entanglement to work around.
+ui.renderGroups(uiMount, ['Granulator']);
+
+const track = ui.modTicks.get('grainPitch');
+check('a target key gets a track entry', Boolean(track), 'true');
+check('hidden until a range is set', track.wrapper.classList.contains('has-mod-range'), 'false');
+
+// grainPitch: min 0.5, max 2.
+ui.setModRange('grainPitch', { lo: 0.75, hi: 1.5 });
+check('setting a range shows it', track.wrapper.classList.contains('has-mod-range'), 'true');
+check('the low tick sits at its fraction of the input range',
+  pct(track.lo.style.left), (((0.75 - 0.5) / 1.5) * 100).toFixed(2));
+check('the high tick sits at its fraction too',
+  pct(track.hi.style.left), (((1.5 - 0.5) / 1.5) * 100).toFixed(2));
+
+ui.setModRange('grainPitch', null);
+check('clearing hides it again', track.wrapper.classList.contains('has-mod-range'), 'false');
+
+check('a key with no range input is a safe no-op',
+  (() => { ui.setModRange('doesNotExist', { lo: 0, hi: 1 }); return 'ok'; })(), 'ok');
+
+// ---------------------------------------------------------------------------
+// BiasSpreadSlider: the sweep line above the rail/band/handle lane
+// ---------------------------------------------------------------------------
+log('\n-- drag-track sweep line --');
+const biasSpec = { key: 'noteBias', label: 'Note Bias', min: 1, max: 127, step: 1, def: 51, display: 'note' };
+const spreadSpec = { key: 'noteSpread', label: 'Note Spread', min: 0, max: 40, step: 1, def: 4, display: 'semitones' };
+const bss = new BiasSpreadSlider({ bus, trackId: 0, biasSpec, spreadSpec, title: 'Note' });
+document.getElementById('mount').appendChild(bss.element);
+
+const modRangeEl = bss.element.querySelector('.bsslider__modrange');
+const hasRange = () => bss.trackEl.classList.contains('has-mod-range');
+
+check('hidden until a range is set', hasRange(), 'false');
+
+bss.setModRange('noteBias', { lo: 32, hi: 96 });
+check('setting a range shows it', hasRange(), 'true');
+{
+  const span = biasSpec.max - biasSpec.min;
+  const expectedLeft = ((32 - biasSpec.min) / span) * 100;
+  const expectedWidth = ((96 - 32) / span) * 100;
+  check('left follows the low edge', pct(modRangeEl.style.left), expectedLeft.toFixed(2));
+  check('width spans to the high edge', pct(modRangeEl.style.width), expectedWidth.toFixed(2));
+}
+
+check('the spread key is not the mappable one -- a no-op',
+  (() => { bss.setModRange('noteSpread', { lo: 0, hi: 1 }); return hasRange(); })(), 'true');
+
+bss.setModRange('noteBias', null);
+check('clearing hides it again', hasRange(), 'false');
+
+log('\n-- the line stays aligned with a narrowed active range --');
+// A direct assignment stands in for dragging the min/max flankers -- setModRange's
+// denominator has to follow `this.range`, not the full schema range, either way.
+bss.range = { min: 20, max: 80 };
+bss.setModRange('noteBias', { lo: 40, hi: 60 });
+{
+  const span = bss.range.max - bss.range.min;
+  const expectedLeft = ((40 - bss.range.min) / span) * 100;
+  const expectedWidth = ((60 - 40) / span) * 100;
+  check('left is relative to the narrowed range, not the full schema range',
+    pct(modRangeEl.style.left), expectedLeft.toFixed(2));
+  check('width follows suit', pct(modRangeEl.style.width), expectedWidth.toFixed(2));
+}
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'mod-range-check-done' : 'mod-range-check-failed';
+</script>
+</body>
+</html>

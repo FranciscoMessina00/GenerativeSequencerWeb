@@ -1,41 +1,39 @@
 import { lfoValue } from '../modulation/lfo.js';
 
 /**
- * The LFO's scope: one cycle of the actual shape, with a dot riding it at the phase
- * currently being heard.
+ * The LFO's scope: a static picture of one cycle of the current shape.
  *
  * The curve is sampled through the same lfoValue() the audio path uses, so what is
  * drawn is the modulation rather than a picture of it -- fold flattening the peaks and
  * the morph between shapes both show up for free, with nothing to keep in sync.
  *
- * Built on EuclidView's canvas idiom: CSS owns the size, the backing store is scaled
- * to the device pixel ratio, and a dirty flag keeps a stopped scope free.
+ * Deliberately no live phase marker: a dot that has to redraw every frame while the LFO
+ * runs is throttled to the display's refresh rate, and near the top of the schema's
+ * rate range that reads as flicker rather than motion, with no fix that doesn't either
+ * cap the usable range or add real complexity for a small display. The shape, fold and
+ * rate are all still fully visible here; only the moment-to-moment phase is not.
+ *
+ * Built on EuclidView's canvas idiom for sizing: CSS owns the size, the backing store is
+ * scaled to the device pixel ratio. There is no animation loop -- draw() runs once per
+ * actual change (a resize, or a new shape/fold), not on a timer.
  */
 
 /** Vertical breathing room, so a peak at 1 does not sit on the frame. */
 const MARGIN_Y = 5;
-/** The phase dot's radius in CSS pixels. */
-const DOT_R = 3.5;
 
 export class LfoView {
   /**
    * @param {object} opts
    * @param {HTMLCanvasElement} opts.canvas sized by CSS; only its backing store is set here
-   * @param {() => number} opts.getPhase phase being heard, 0..1
    */
-  constructor({ canvas, getPhase }) {
+  constructor({ canvas }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.getPhase = getPhase;
 
     this.shape = 0;
     this.fold = 0;
-    this.phase = 0;
-    this.running = false;
     this.cssWidth = 0;
     this.cssHeight = 0;
-    /** Repaint only when something changed; see frame(). */
-    this.dirty = true;
 
     // A ResizeObserver rather than only a window listener, because this canvas is
     // built inside its panel and cannot be measured until the panel is in the
@@ -49,53 +47,28 @@ export class LfoView {
     // changes what the backing store should be without changing the CSS box, so the
     // observer alone would never hear about it.
     window.addEventListener('resize', () => this.resize());
-    requestAnimationFrame(() => this.frame());
   }
 
   resize() {
     const rect = this.canvas.getBoundingClientRect();
     // Before layout, and whenever the panel is hidden, the box measures zero. Bail
-    // rather than storing that: a scope that was drawing correctly should not be
-    // blanked by one bad measurement, and draw() has nothing to do at zero size.
-    if (!(rect.width > 0 && rect.height > 0)) {
-      this.dirty = true;
-      return;
-    }
+    // rather than drawing into that -- there is nothing to draw, and canvas.width/height
+    // would end up a meaningless 1x1 backing store.
+    if (!(rect.width > 0 && rect.height > 0)) return;
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.max(1, Math.round(rect.width * dpr));
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.cssWidth = rect.width;
     this.cssHeight = rect.height;
-    // Assigning canvas.width/height blanks the surface.
-    this.dirty = true;
+    this.draw();
   }
 
-  /** The shape being drawn. Only these two change the curve. */
+  /** The shape being drawn. Only these two ever change the curve. */
   setWave(shape, fold) {
     this.shape = Number(shape) || 0;
     this.fold = Number(fold) || 0;
-    this.dirty = true;
-  }
-
-  setRunning(running) {
-    this.running = Boolean(running);
-    this.dirty = true;
-  }
-
-  frame() {
-    // Unlike EuclidView, this asks for a repaint on every frame while running: the dot
-    // moves continuously rather than in discrete jumps, so there is no cheaper signal
-    // to gate on. Stopped, the flag does its usual job and the scope costs nothing.
-    if (this.running) {
-      this.phase = Number(this.getPhase()) || 0;
-      this.dirty = true;
-    }
-    if (this.dirty) {
-      this.draw();
-      this.dirty = false;
-    }
-    requestAnimationFrame(() => this.frame());
+    this.draw();
   }
 
   /** Curve height at a phase, in CSS pixels from the top. */
@@ -105,22 +78,11 @@ export class LfoView {
     return mid - lfoValue(this.shape, this.fold, phase) * amplitude;
   }
 
-  /**
-   * Where the phase marker sits, in CSS pixels. Public so the geometry can be checked
-   * without reading pixels back off the canvas, which the browser checks avoid.
-   */
-  markerPoint() {
-    return { x: this.phase * this.cssWidth, y: this.#yFor(this.phase) };
-  }
-
   draw() {
     const ctx = this.ctx;
     const w = this.cssWidth;
     const h = this.cssHeight;
-    // Nothing to draw before the first real measurement. Without this the curve loop
-    // below would run exactly once at w = 0, emitting a lone moveTo and stroking
-    // nothing -- which is silent, looks like a working scope, and is impossible to
-    // spot from the outside.
+    // Nothing to draw before the first real measurement -- see resize().
     if (!(w > 0 && h > 0)) return;
     ctx.clearRect(0, 0, w, h);
 
@@ -144,26 +106,5 @@ export class LfoView {
     ctx.strokeStyle = '#4a90b8';
     ctx.lineWidth = 1.5;
     ctx.stroke();
-
-    // The marker is drawn whether or not the transport is running: parked and dim
-    // while stopped, so it is visible before anything is ever started rather than the
-    // panel looking like it has no position readout at all. It only *moves* while
-    // running, because that is the only time the LFO is advancing -- a marker gliding
-    // along while nothing is being modulated would be claiming something untrue.
-    const { x, y } = this.markerPoint();
-
-    // A full-height rule as well as the dot: at this size the dot alone is easy to
-    // miss, and the line is what makes the position readable at a glance.
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
-    ctx.strokeStyle = this.running ? 'rgba(207, 234, 255, 0.45)' : 'rgba(207, 234, 255, 0.16)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(x, y, DOT_R, 0, Math.PI * 2);
-    ctx.fillStyle = this.running ? '#cfeaff' : 'rgba(207, 234, 255, 0.35)';
-    ctx.fill();
   }
 }

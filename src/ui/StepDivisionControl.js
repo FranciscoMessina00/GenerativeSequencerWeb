@@ -27,8 +27,11 @@ export class StepDivisionControl {
    * @param {number} [opts.trackId]
    * @param {object} opts.divisionSpec paramSchema entry for the note value
    * @param {object} opts.modSpec  paramSchema entry for the tri-state modifier
+   * @param {boolean} [opts.compact] shrink the division number to dragnum--compact,
+   *   for a host (the LFO panel) that swaps this in for an already-compact control
+   *   and needs the two to match. The hub's own instance leaves this off.
    */
-  constructor({ bus, trackId = 0, divisionSpec, modSpec }) {
+  constructor({ bus, trackId = 0, divisionSpec, modSpec, compact = false }) {
     this.bus = bus;
     this.trackId = trackId;
     this.divisionSpec = divisionSpec;
@@ -43,6 +46,7 @@ export class StepDivisionControl {
       describe: (value) => noteValueDescription(value, this.mod),
       onInput: (value) => this.#emit(divisionSpec.key, value),
     });
+    if (compact) this.divisionControl.element.classList.add('dragnum--compact');
 
     this.modButtons = new Map([
       [STEP_MOD_TRIPLET, this.#buildModButton('T', STEP_MOD_TRIPLET, 'Triplet')],

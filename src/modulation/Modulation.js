@@ -94,27 +94,6 @@ export class Modulation {
   }
 
   /**
-   * Phase at an arbitrary time, without advancing anything -- what the scope draws its
-   * dot from.
-   *
-   * `anchorTime` sits one step in the future, so this normally interpolates *backwards*
-   * from it, which is exactly right: it yields the phase of what is being heard now
-   * rather than of what has already been scheduled. Frozen while stopped, since the
-   * LFO is not driving anything then either.
-   */
-  phaseAt(time) {
-    if (!this.running || this.anchorTime === null) return this.phase;
-    const period = this.period();
-    if (!Number.isFinite(period) || period <= 0) return this.phase;
-    const turns = (Number(time) - this.anchorTime) / period;
-    if (!Number.isFinite(turns)) return this.phase;
-    // Clamp the extrapolation to a single cycle so a stalled tab cannot spin the dot.
-    const bounded = Math.max(-1, Math.min(1, turns));
-    const wrapped = (this.phase + bounded) % 1;
-    return wrapped < 0 ? wrapped + 1 : wrapped;
-  }
-
-  /**
    * Advance and write, once per step.
    *
    * The value is evaluated at `audioTime + stepDuration` rather than at `audioTime`.
@@ -124,11 +103,10 @@ export class Modulation {
    * matched to the LFO's phase there.
    */
   onStep({ audioTime, stepDuration }) {
-    // Advanced unconditionally, before anything is checked: the LFO is running
-    // whenever the transport is, whether or not it has been pointed at a parameter.
-    // That is what lets the scope show a live phase while the shape and rate are being
-    // dialled in -- gating this on having a target would leave the marker frozen at
-    // the factory settings, which are deliberately unmapped.
+    // Advanced unconditionally, before anything is checked: the LFO keeps running
+    // whenever the transport does, whether or not it is currently pointed at a
+    // parameter. That way mapping a target or raising the depth drops the LFO into
+    // wherever its cycle already is, rather than restarting it cold from phase 0.
     this.#advance(audioTime, stepDuration);
 
     const key = this.#drivenKey();

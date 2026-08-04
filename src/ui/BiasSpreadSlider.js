@@ -101,9 +101,14 @@ export class BiasSpreadSlider {
     rail.className = 'bsslider__rail';
     this.bandEl = document.createElement('div');
     this.bandEl.className = 'bsslider__band';
+    // The LFO's sweep along the bias axis, when this track is its target -- shifted
+    // up clear of the rail/band/handle's shared lane, so a green sweep line and the
+    // blue spread band never merge into one confusing bar. See setModRange().
+    this.modRangeEl = document.createElement('div');
+    this.modRangeEl.className = 'bsslider__modrange';
     this.handleEl = document.createElement('div');
     this.handleEl.className = 'bsslider__handle';
-    this.trackEl.append(rail, this.bandEl, this.handleEl);
+    this.trackEl.append(rail, this.bandEl, this.modRangeEl, this.handleEl);
 
     const minControl = this.#buildRangeControl('min');
     const maxControl = this.#buildRangeControl('max');
@@ -228,6 +233,28 @@ export class BiasSpreadSlider {
       return;
     }
     this.#updateVisuals();
+  }
+
+  /**
+   * The LFO's sweep along the bias axis, when it is the target -- `range` is
+   * `{ lo, hi }` in the bias param's own units, from modulation/modRange.js, or
+   * null to clear it. A no-op for the spread key or any other key, matching
+   * setValue's per-key check -- this control drives two params, but only bias
+   * is ever mappable (see main.js's targetKeyOf).
+   *
+   * Positioned over `this.range`, the same denominator #updateVisuals() uses
+   * for the band, so the line stays aligned with the handle even if the active
+   * range has been narrowed.
+   */
+  setModRange(key, range) {
+    if (key !== this.biasSpec.key) return;
+    this.trackEl.classList.toggle('has-mod-range', Boolean(range));
+    if (!range) return;
+    const span = this.range.max - this.range.min;
+    const loFrac = span > 0 ? clamp((range.lo - this.range.min) / span, 0, 1) : 0;
+    const hiFrac = span > 0 ? clamp((range.hi - this.range.min) / span, 0, 1) : 0;
+    this.modRangeEl.style.left = `${loFrac * 100}%`;
+    this.modRangeEl.style.width = `${Math.max(0, hiFrac - loFrac) * 100}%`;
   }
 
   #emitBias() {

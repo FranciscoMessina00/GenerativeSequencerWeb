@@ -53,12 +53,58 @@ test('every shape leaves phase 0 at zero and rising, so morphing never shifts ph
 });
 
 test('a morph between two anchors is a plain crossfade of them', () => {
-  // Halfway through the first segment is half sine, half triangle.
+  // Halfway through the first segment is half sine, half triangle. Triangle -> saw
+  // (the next segment) is deliberately not this -- see the tests below.
   const halfway = (0 + 1 / 3) / 2;
   for (const p of PHASES) {
     const sine = shapeValue(0, p);
     const triangle = shapeValue(1 / 3, p);
     assert.ok(close(shapeValue(halfway, p), (sine + triangle) / 2, 1e-9), `phase ${p}`);
+  }
+});
+
+test('triangle -> saw: the peak stays exactly at 1 and slides in phase, not amplitude', () => {
+  // Restated independently of triSawShape()'s own formula, the same way the anchor
+  // test above states its own expected functions: each point in this segment is
+  // rise 0->1 over width r, fall 1->-1 over 1-2r, rise -1->0 over r, with r sliding
+  // from 0.25 (triangle) to 0.5 (saw).
+  const peakPhase = (blend) => 0.25 + 0.25 * blend;
+  for (const blend of [0, 0.2, 0.5, 0.8, 1]) {
+    const shape = (1 + blend) / 3; // this segment spans shape 1/3..2/3
+    const r = peakPhase(blend);
+    // Approached from just below r, not evaluated exactly at it: at blend 1 (pure
+    // saw) the fall width is 0, so r is the jump itself and the value exactly there
+    // is already the post-jump trough, not the peak the jump is approaching.
+    assert.ok(close(shapeValue(shape, r - 1e-7), 1, 1e-4), `peak at blend ${blend}, phase ${r}`);
+    assert.ok(close(shapeValue(shape, r + (1 - 2 * r)), -1), `trough at blend ${blend}`);
+  }
+  // The peak's own phase advances monotonically towards saw's -- a plain crossfade
+  // of the two anchors' y-values would not move the peak at all; it would instead
+  // sag, its own magnitude dropping as low as 2/3 partway through (max(1 - 0.5b, b)
+  // at blend b, minimised at b = 2/3).
+  const phases = [0, 0.2, 0.5, 0.8, 1].map(peakPhase);
+  for (let i = 1; i < phases.length; i += 1) {
+    assert.ok(phases[i] > phases[i - 1], `phase should keep advancing: ${phases}`);
+  }
+  for (const blend of [0, 0.2, 1 / 3, 0.5, 2 / 3, 0.8, 1]) {
+    const shape = (1 + blend) / 3;
+    let peak = 0;
+    // Fine enough that a grid search's own discretisation error stays well under
+    // the tolerance below -- a coarser grid can undershoot the true peak by more
+    // than that on its own, with nothing wrong in shapeValue itself.
+    for (let p = 0; p < 1; p += 0.0001) peak = Math.max(peak, Math.abs(shapeValue(shape, p)));
+    assert.ok(close(peak, 1, 1e-3), `blend ${blend}: brute-force peak was ${peak}, not 1`);
+  }
+});
+
+test('the triangle->saw formula meets the saw anchor exactly at the segment boundary', () => {
+  // shapeValue switches formulas at shape 2/3 (segment 2 takes over, unchanged) --
+  // confirm the new formula approaches the same limit from below, so there is no
+  // seam at that boundary. Phase 0.5 is excluded: that is the jump itself, where
+  // "continuity" is not a meaningful thing to ask of an ever-steepening edge.
+  const justBefore = 2 / 3 - 1e-6;
+  for (const p of PHASES.filter((p) => p !== 0.5)) {
+    assert.ok(close(shapeValue(justBefore, p), shapeValue(2 / 3, p), 1e-4), `phase ${p}`);
   }
 });
 
@@ -144,6 +190,51 @@ test('output is always finite and within [-1, 1] across the whole surface', () =
         assert.ok(v >= -1 && v <= 1, `out of range at ${shape}/${fold}/${p}: ${v}`);
       }
     }
+  }
+});
+
+/**
+ * Brute-force peak of lfoValue over one full cycle, for the normalization tests.
+ *
+ * A grid search never quite lands on the true peak, so this is deliberately finer
+ * than lfoValue's own internal FOLD_PEAK_SAMPLES -- an independent, higher-res
+ * check, rather than one liable to share the same discretisation error.
+ */
+function cyclePeak(shape, fold) {
+  let peak = 0;
+  for (let p = 0; p < 1; p += 0.001) peak = Math.max(peak, Math.abs(lfoValue(shape, fold, p)));
+  return peak;
+}
+
+test('fold renormalizes the peak back to a full 1 across almost the whole surface', () => {
+  for (const shape of [0, 0.1, 0.25, 1 / 3, 0.5, 2 / 3, 0.8, 0.9]) {
+    for (const fold of [0.1, 0.3, 0.5, 0.7, 0.9, 1]) {
+      const peak = cyclePeak(shape, fold);
+      assert.ok(close(peak, 1, 1e-2), `shape ${shape} fold ${fold}: peak was ${peak}`);
+    }
+  }
+});
+
+test('pure square keeps a full peak until fold is almost maxed, then tapers smoothly to silence', () => {
+  // Below the gain cap, dividing by the true (low but nonzero) peak still reaches 1.
+  for (const fold of [0.5, 0.8, 0.9, 0.95]) {
+    assert.ok(close(cyclePeak(1, fold), 1, 1e-2), `fold ${fold}`);
+  }
+  // Past that point the gain is capped, so the peak now tapers -- smoothly, never
+  // jumping back up -- down to exactly 0 at fold 1, the one truly degenerate corner.
+  const tapered = [0.96, 0.98, 1].map((fold) => cyclePeak(1, fold));
+  for (let i = 1; i < tapered.length; i += 1) {
+    assert.ok(tapered[i] <= tapered[i - 1] + 1e-9, `should keep decreasing: ${tapered}`);
+  }
+  assert.ok(close(tapered[2], 0, 1e-9), `fold 1 should reach exact silence, got ${tapered[2]}`);
+});
+
+test('the degenerate corner is exact silence, not a division artefact', () => {
+  // close() rather than assert.equal(): square's negative half folds to a signed
+  // -0 (sign kept, magnitude 0), and assert/strict's equal uses Object.is, which
+  // treats -0 and 0 as different -- a distinction with no audible meaning here.
+  for (const p of PHASES) {
+    assert.ok(close(lfoValue(1, 1, p), 0), `phase ${p}`);
   }
 });
 
@@ -290,9 +381,9 @@ test('nothing is written while unmapped or at zero depth', () => {
 
 test('the phase advances even with nothing mapped, while still writing nothing', () => {
   // Regression test: the phase advance used to sit behind the same guard as the write,
-  // so at the factory defaults (target 0, amount 0) the LFO never moved at all and the
-  // scope's marker stayed frozen at the start of the cycle. Watching the shape and rate
-  // must not require having chosen a destination first.
+  // so at the factory defaults (target 0, amount 0) the LFO never moved at all -- and
+  // mapping a target later would have dropped it in cold at phase 0 rather than
+  // wherever its cycle already was.
   const h = harness();
   h.modulation.setParam('lfoRate', 1);
   h.modulation.setRunning(true);
@@ -308,8 +399,6 @@ test('the phase advances even with nothing mapped, while still writing nothing',
   assert.ok(close(seen[2], 0.75), `got ${seen[2]}`);
   assert.ok(close(seen[3], 0), `should wrap, got ${seen[3]}`);
   assert.deepEqual(h.writes, [], 'an unmapped LFO must still write nothing');
-  // And the interpolated read the scope uses has to work too, which needs anchorTime.
-  assert.ok(Number.isFinite(h.modulation.phaseAt(1)));
 });
 
 test('the offset is bipolar around the stored value and scaled by half the range', () => {
@@ -435,25 +524,3 @@ test('a tempo change moves the synced period without jumping the phase', () => {
   assert.equal(modulation.phase, before, 'the phase itself must not jump');
 });
 
-test('phaseAt reads back from the anchor without advancing, and freezes when stopped', () => {
-  const h = armed('grainDryWet', 1, { lfoRate: 1 });
-  h.modulation.onStep({ audioTime: 0, stepDuration: 0.25 });
-  const anchored = h.modulation.phase;
-
-  // The anchor sits at the *next* step's time (0.25), so asking about now reads back.
-  assert.ok(close(h.modulation.phaseAt(0.25), anchored));
-  assert.ok(close(h.modulation.phaseAt(0.125), anchored - 0.125), 'should interpolate back');
-  assert.equal(h.modulation.phase, anchored, 'phaseAt must not mutate');
-
-  h.modulation.setRunning(false);
-  assert.equal(h.modulation.phaseAt(99), h.modulation.phase, 'frozen while stopped');
-});
-
-test('phaseAt never runs away, even if steps stop arriving', () => {
-  const h = armed('grainDryWet', 1, { lfoRate: 1 });
-  h.modulation.onStep({ audioTime: 0, stepDuration: 0.25 });
-  for (const t of [1, 10, 1e6]) {
-    const p = h.modulation.phaseAt(t);
-    assert.ok(Number.isFinite(p) && p >= 0 && p < 1, `phaseAt(${t}) = ${p}`);
-  }
-});

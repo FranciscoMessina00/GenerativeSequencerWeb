@@ -90,9 +90,11 @@ export const INFO_TEXT = {
   // The bias/spread axis-lock toggle: a view preference, deliberately not a schema
   // param and not persisted -- see BiasSpreadSlider.js.
   axisLock: 'Axis Lock — when off, a drag moves only the axis it starts along, instead of both at once.',
-  // The LFO's scope and its assign button: a picture and a mode, neither one a param.
-  lfoScope: 'LFO Scope — one cycle of the current shape, with a dot at the phase you are hearing.',
+  // The LFO's scope, its assign button, and its clear button: a picture, a mode,
+  // and an action -- none of them a param.
+  lfoScope: 'LFO Scope — one cycle of the current shape, after folding.',
   lfoMap: 'Map — press, then click any highlighted control to point the LFO at it. Escape cancels.',
+  lfoClear: 'Clear — unmaps the LFO from whatever it is currently pointed at.',
   // Fallbacks for the generated `<key>.min` / `<key>.max` range-edge drag-numbers.
   'range.min': 'Range Low — the lowest value this slider can reach. Drag to change it.',
   'range.max': 'Range High — the highest value this slider can reach. Drag to change it.',

@@ -13,6 +13,7 @@ const NON_PARAM_IDS = new Set([
   'axisLock',
   'lfoScope',
   'lfoMap',
+  'lfoClear',
   'range.min',
   'range.max',
   'play',

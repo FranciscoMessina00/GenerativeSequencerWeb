@@ -250,13 +250,30 @@ main {
   padding: 12px 14px 14px;
 }
 
+/* display:flex here is a no-op for every heading except Modulation's, whose extra
+   content (the LFO's target readout -- see UIController#renderGroups's headingExtra
+   and main.js) becomes a second flex item and lands on the right, "MODULATION" on
+   the left. A bare text node is still a valid flex item on its own, so this needs no
+   wrapper span around the group name. */
 .group h2 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0 0 10px;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.09em;
   color: var(--accent);
+}
+
+/* Not part of the heading's own ALL-CAPS styling -- the target's label is a real
+   param name (e.g. "Grain Dry/Wet") and should read normally, not shout. */
+.group h2 .lfo__target-row {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
 }
 
 .control { margin-bottom: 11px; }
@@ -277,6 +294,11 @@ main {
   flex-shrink: 0;
 }
 
+/* Wraps the range input so tick marks have a positioned parent to sit against --
+   the input itself keeps the same 100%-width sizing it always had, just relative
+   to this instead of directly to .control. */
+.control__track { position: relative; }
+
 input[type="range"] {
   width: 100%;
   height: 18px;
@@ -286,6 +308,22 @@ input[type="range"] {
   appearance: none;
   cursor: pointer;
 }
+
+/* The LFO's sweep, when this slider is its target -- two ticks at the range's
+   edges. `left` comes from UIController#setModRange as a plain percentage of
+   the input's own min..max; the thumb already marks the base value, so there
+   is no third mark here. */
+.control__modtick {
+  display: none;
+  position: absolute;
+  top: 2px;
+  width: 2px;
+  height: 14px;
+  background: rgba(130, 230, 150, 0.65);
+  transform: translateX(-1px);
+  pointer-events: none;
+}
+.control__track.has-mod-range .control__modtick { display: block; }
 input[type="range"]::-webkit-slider-runnable-track {
   height: 3px;
   background: var(--line);
@@ -543,6 +581,23 @@ input[type="range"]::-moz-range-thumb {
 .bsslider__track.is-dragging .bsslider__band {
   background: #3a5c71;
 }
+
+/* The LFO's sweep along the bias axis, when this track is its target -- shifted
+   up clear of the rail/band/handle's shared top:50% lane, so it reads as a
+   separate lane rather than competing with the spread band for the same space.
+   `left`/`width` come from BiasSpreadSlider#setModRange as plain percentages of
+   the handle's own active range. */
+.bsslider__modrange {
+  display: none;
+  position: absolute;
+  top: 50%;
+  height: 3px;
+  margin-top: -13px;
+  border-radius: 2px;
+  background: rgba(130, 230, 150, 0.65);
+  pointer-events: none;
+}
+.bsslider__track.has-mod-range .bsslider__modrange { display: block; }
 
 .bsslider__handle {
   position: absolute;
@@ -827,6 +882,35 @@ input[type="range"]::-moz-range-thumb {
   filter: drop-shadow(0 0 3px rgba(111, 184, 224, 0.6));
 }
 
+/* The LFO's reach, when this control is its target -- a line beside the glyph
+   (not on it, so it never competes with the fill for the same 24px) with a dot
+   at the base value. Hidden unless FillIconControl#setModRange has set one;
+   `top`/`height` come from there as plain percentages of the glyph's own height. */
+.fillicon__modrange,
+.fillicon__moddot {
+  display: none;
+  position: absolute;
+  left: 100%;
+}
+.fillicon.has-mod-range .fillicon__modrange,
+.fillicon.has-mod-range .fillicon__moddot { display: block; }
+
+.fillicon__modrange {
+  margin-left: 5px;
+  width: 2px;
+  background: rgba(130, 230, 150, 0.65);
+  border-radius: 1px;
+}
+
+.fillicon__moddot {
+  margin-left: 3px;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: rgba(130, 230, 150, 0.9);
+}
+
 /* Fixed height regardless of what text is inside -- the caption and the peeked
    percentage must occupy the same slot, or swapping between them would jump the glyph
    above it. Shared with .logic-op__label and .trig-loop__label so all five controls in
@@ -1016,12 +1100,50 @@ input[type="range"]::-moz-range-thumb {
   gap: 6px;
 }
 
-/* The rate row hides whichever of its two controls is not in use, and both of them
+/* The rate control hides whichever of its two faces is not in use, and both of them
    set their own `display` -- which beats [hidden]'s display:none from the UA
    stylesheet, so without this the free rate and the synced division show at once. */
 .lfo [hidden] { display: none; }
 .lfo__row--shape { flex-direction: column; align-items: stretch; gap: 3px; }
-.lfo__row--depth { justify-content: space-between; }
+
+/* Fold | Rate(+Sync) above, Amount | Map below -- the same 2x2 idiom .hub uses for
+   Steps/Pulses/Rotation/Division, right down to the mirrored alignment: the left
+   column pushes right, the right column pushes left, so all four hug the shared
+   centre gutter and read as one cluster rather than four separate boxes. Keyed off
+   grid position (odd/even), not identity, for the same reason .hub does it that way --
+   reordering the four stays correct without touching this rule. */
+.lfo__grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  align-items: center;
+  gap: 4px 2px;
+}
+.lfo__grid > :nth-child(odd) { justify-self: end; }
+.lfo__grid > :nth-child(odd).dragnum,
+.lfo__grid > :nth-child(odd) .dragnum { align-items: flex-end; }
+
+.lfo__grid > :nth-child(even) { justify-self: start; }
+.lfo__grid > :nth-child(even).dragnum,
+.lfo__grid > :nth-child(even) .dragnum { align-items: flex-start; }
+
+/* Rate-or-Division and Sync as one grid cell: Sync only says which face of Rate is
+   showing, so it travels with it -- trailing after the number, since this cell sits
+   in the right column -- rather than claiming a quarter of the grid alone. */
+.lfo__rate-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Bigger than a plain compact drag-number, so Fold/Rate/Amount's boxes read at
+   roughly the same size as the Map button beside them -- an icon plus a caption is
+   naturally taller than a number plus a label, and without this the grid's four
+   cells looked mismatched. Scoped to this grid rather than changed on
+   .dragnum--compact itself, since BiasSpreadSlider's range-edge flankers share that
+   class and were not asked to grow. */
+.lfo__grid .dragnum--compact { padding: 6px 8px; }
+.lfo__grid .dragnum--compact .dragnum__value { font-size: 16px; }
+.lfo__grid .dragnum--compact .dragnum__label { font-size: 9px; }
 
 .lfo__header { display: flex; justify-content: space-between; align-items: baseline; }
 .lfo__label {
@@ -1036,21 +1158,24 @@ input[type="range"]::-moz-range-thumb {
 
 .lfo__slider { width: 100%; }
 
-/* Same letter-button treatment as the step division's T and D, since it does the same
-   job: a small always-visible toggle that changes what the neighbouring control means. */
+/* A small icon-only toggle -- the metronome glyph is the whole button, no caption --
+   that changes what the neighbouring control means. Square and compact so it sits
+   flush against the rate/division control at the same height either way. */
 .lfo__sync {
-  padding: 3px 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--panel-2);
   color: var(--muted);
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
   cursor: pointer;
   transition: background-color 0.12s, border-color 0.12s, color 0.12s;
 }
+.lfo__sync .icon { width: 16px; height: 16px; }
 .lfo__sync:hover, .lfo__sync:focus-visible {
   border-color: rgba(111, 184, 224, 0.28);
   color: var(--text);
@@ -1079,7 +1204,11 @@ input[type="range"]::-moz-range-thumb {
   font: inherit;
   transition: background-color 0.12s, border-color 0.12s, color 0.12s;
 }
-.lfo__map .icon { width: 20px; height: 20px; }
+/* 18px rather than a plain 20px: Map's icon+gap (23px) sat taller than Amount's
+   value+gap (~18.6px) by enough to outweigh Map's own smaller top padding, so its
+   caption landed about 2px lower than Amount's -- visible even though the two
+   boxes' overall heights already matched. Shrinking the icon closes that gap. */
+.lfo__map .icon { width: 16px; height: 16px; }
 .lfo__map:hover, .lfo__map:focus-visible {
   background: rgba(111, 184, 224, 0.09);
   border-color: rgba(111, 184, 224, 0.28);
@@ -1100,10 +1229,17 @@ input[type="range"]::-moz-range-thumb {
   color: inherit;
 }
 
+.lfo__target-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
 /* Names the destination, which the Map button has no room for. Fixed height so
    swapping between a name, "Not mapped" and the assigning prompt never reflows the
    panel and shifts the controls above it. */
 .lfo__target {
+  flex: 1;
   height: 13px;
   font-size: 10px;
   line-height: 13px;
@@ -1115,7 +1251,29 @@ input[type="range"]::-moz-range-thumb {
 .lfo__target.is-unmapped { color: var(--muted); }
 .lfo__target.is-assigning { color: var(--accent-2); }
 
-/* ---- modulation assignment: what can be mapped, and what is ---- */
+/* Unmaps the LFO directly, rather than making the user pick a different target or
+   reload a preset. Only ever shown alongside a real mapping -- see setValue()'s
+   #renderTarget(), which hides it while unmapped or mid-pick. */
+.lfo__clear {
+  padding: 0;
+  width: 13px;
+  height: 13px;
+  line-height: 11px;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+.lfo__clear:hover, .lfo__clear:focus-visible {
+  background: rgba(111, 184, 224, 0.16);
+  color: var(--text);
+  outline: none;
+}
+
+/* ---- modulation assignment: what can be mapped ---- */
 
 /* Only while the Map button is armed. A dashed ring rather than the usual solid
    engaged border, because this is an invitation to click rather than a state the
@@ -1125,14 +1283,6 @@ input[type="range"]::-moz-range-thumb {
   outline-offset: 2px;
   border-radius: 4px;
   cursor: crosshair;
-}
-/* Persistent, so what the LFO is moving stays visible after assigning. Green, the
-   colour already used for "this actually fired", not the accent blue that every
-   hover state uses. */
-.is-modulated {
-  outline: 1px solid rgba(130, 230, 150, 0.5);
-  outline-offset: 2px;
-  border-radius: 4px;
 }
 
 /* ---- info bar: pinned footer, marquees when the description overruns ---- */

@@ -20,6 +20,8 @@ export class UIController {
     this.inputs = new Map();
     /** key -> DragNumber, for the controls rendered inside the step ring. */
     this.dragNumbers = new Map();
+    /** key -> { wrapper, lo, hi, spec }, for setModRange -- range-input keys only. */
+    this.modTicks = new Map();
   }
 
   /** Human-readable value for the enum-ish params, which are integers on the wire. */
@@ -40,9 +42,11 @@ export class UIController {
    *
    * `skip` omits keys so they can be rendered elsewhere without appearing twice --
    * some params live inside the step ring rather than the side panel. `prepend`
-   * puts a custom widget (e.g. a BiasSpreadSlider) at the top of a group.
+   * puts a custom widget (e.g. a BiasSpreadSlider) at the top of a group. `headingExtra`
+   * puts one on the group's own heading line instead -- e.g. the LFO's target readout,
+   * which reads better next to "Modulation" than inside the panel below it.
    */
-  renderGroups(container, groupNames, { skip = [], prepend = {} } = {}) {
+  renderGroups(container, groupNames, { skip = [], prepend = {}, headingExtra = {} } = {}) {
     const skipped = new Set(skip);
 
     for (const group of groupNames) {
@@ -57,6 +61,8 @@ export class UIController {
 
       const heading = document.createElement('h2');
       heading.textContent = group;
+      const titleExtra = headingExtra[group];
+      if (titleExtra) heading.appendChild(titleExtra);
       section.appendChild(heading);
 
       if (extra) section.appendChild(extra);
@@ -152,9 +158,45 @@ export class UIController {
     const header = document.createElement('div');
     header.className = 'control-header';
     header.append(label, value);
-    wrapper.append(header, input);
+
+    if (spec.type === 'toggle') {
+      wrapper.append(header, input);
+    } else {
+      // Wrapped rather than left bare, so the LFO's sweep -- when this param is
+      // its target -- has a positioned parent to place tick marks against. A
+      // toggle has no numeric range to mark, so it never gets one.
+      const track = document.createElement('div');
+      track.className = 'control__track';
+      const modLo = document.createElement('span');
+      modLo.className = 'control__modtick control__modtick--lo';
+      const modHi = document.createElement('span');
+      modHi.className = 'control__modtick control__modtick--hi';
+      track.append(input, modLo, modHi);
+      this.modTicks.set(spec.key, { wrapper: track, lo: modLo, hi: modHi, spec });
+      wrapper.append(header, track);
+    }
 
     return wrapper;
+  }
+
+  /**
+   * The LFO's sweep on a plain slider, drawn as two tick marks at the range's
+   * edges -- the thumb itself already marks the base value, so no extra dot is
+   * needed here. `range` is `{ lo, hi }` in this param's own units, from
+   * modulation/modRange.js, or null to clear it. A no-op for any key this
+   * controller didn't build a range input for.
+   */
+  setModRange(key, range) {
+    const entry = this.modTicks.get(key);
+    if (!entry) return;
+    entry.wrapper.classList.toggle('has-mod-range', Boolean(range));
+    if (!range) return;
+    const { spec } = entry;
+    const span = spec.max - spec.min;
+    const loPct = span > 0 ? ((range.lo - spec.min) / span) * 100 : 0;
+    const hiPct = span > 0 ? ((range.hi - spec.min) / span) * 100 : 0;
+    entry.lo.style.left = `${loPct}%`;
+    entry.hi.style.left = `${hiPct}%`;
   }
 
   /**

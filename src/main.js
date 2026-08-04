@@ -21,6 +21,7 @@ import { LfoPanel } from './ui/LfoPanel.js';
 import { InfoBar } from './ui/InfoBar.js';
 import { Modulation } from './modulation/Modulation.js';
 import { MOD_TARGETS } from './modulation/modTargets.js';
+import { modSweepRange } from './modulation/modRange.js';
 import { diceIcon } from './ui/icons.js';
 import { SCALES } from './sequencer/scales.js';
 
@@ -262,7 +263,6 @@ const lfoPanel = new LfoPanel({
   foldSpec: paramSpec('lfoFold'),
   amountSpec: paramSpec('lfoAmount'),
   targetSpec: paramSpec('lfoTarget'),
-  getPhase: () => modulation?.phaseAt(audio.currentTime) ?? 0,
   onMapRequest: () => toggleAssignMode(),
 });
 sliderPrepend.Modulation = lfoPanel.element;
@@ -277,6 +277,7 @@ ui.renderGroups(
   {
     skip: [...sliderSkipKeys, ...NOTE_LOOP_KEYS, ...VEL_LOOP_KEYS, ...LFO_KEYS, 'scale', 'glideAmount', 'glideMode'],
     prepend: sliderPrepend,
+    headingExtra: { Modulation: lfoPanel.targetRow },
   },
 );
 // Attaching a hidden readout would still cost a full reformat on every step, so
@@ -312,11 +313,21 @@ view.setLoopActive(tracks[VISIBLE_TRACK].params.trigLoop);
 // the key here keeps the dispatch below a single Map lookup rather than a chain of
 // instanceof checks.
 const controlSetters = new Map();
+// key -> how to draw (or clear) the LFO's sweep on its control, for whichever
+// widgets implement setModRange -- most don't, and are simply never added here.
+// See renderModRange() below.
+const modRangeSetters = new Map();
 const registerKeyed = (widget) => {
-  for (const key of widget.keys()) controlSetters.set(key, (v) => widget.setValue(key, v));
+  for (const key of widget.keys()) {
+    controlSetters.set(key, (v) => widget.setValue(key, v));
+    if (widget.setModRange) modRangeSetters.set(key, (r) => widget.setModRange(key, r));
+  }
 };
 const registerLeaf = (widget) => {
-  for (const key of widget.keys()) controlSetters.set(key, (v) => widget.setValue(v));
+  for (const key of widget.keys()) {
+    controlSetters.set(key, (v) => widget.setValue(v));
+    if (widget.setModRange) modRangeSetters.set(key, (r) => widget.setModRange(r));
+  }
 };
 
 registerKeyed(ui);
@@ -407,12 +418,25 @@ function toggleAssignMode() {
   setAssignMode(!assigning);
 }
 
-/** Mark whatever is currently modulated, so it stays visible after assigning. */
-function renderModulatedMark() {
+// Which control last had a sweep drawn on it, so a target change clears the
+// previous one rather than leaving it stuck showing a stale range.
+let modRangeKey = null;
+
+/**
+ * Draw the LFO's reach on whatever it targets, and clear it off whatever it just
+ * stopped targeting. Purely a function of the store's current lfoTarget, lfoAmount
+ * and the target's own base value -- called again whenever any of those three
+ * change, never on a timer, since there is no live phase involved (see
+ * modulation/modRange.js).
+ */
+function renderModRange() {
   const key = MOD_TARGETS[store.get('lfoTarget', VISIBLE_TRACK)] ?? null;
-  for (const el of document.querySelectorAll('[data-info]')) {
-    el.classList.toggle('is-modulated', Boolean(key) && targetKeyOf(el) === key);
-  }
+  if (modRangeKey && modRangeKey !== key) modRangeSetters.get(modRangeKey)?.(null);
+  modRangeKey = key;
+  if (!key) return;
+  const amount = store.get('lfoAmount', VISIBLE_TRACK);
+  const base = Number(store.get(key, VISIBLE_TRACK));
+  modRangeSetters.get(key)?.(modSweepRange(key, base, amount));
 }
 
 // Capture phase, so the click binds the control instead of operating it -- otherwise
@@ -437,7 +461,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 bus.on('param:changed', ({ key }) => {
-  if (key === 'lfoTarget') renderModulatedMark();
+  if (key === 'lfoTarget' || key === 'lfoAmount' || key === modRangeKey) renderModRange();
 });
 
 // ---------------------------------------------------------------------------
@@ -484,7 +508,6 @@ bus.on('transport:change', ({ running }) => {
   // Resets the LFO's phase on start, so a synced one is locked to the bar; on stop it
   // hands the parameter it was driving back to the value the store holds.
   modulation.setRunning(running);
-  lfoPanel.setRunning(running);
   playButton.textContent = running ? 'Stop' : 'Play';
   playButton.classList.toggle('active', running);
   if (!running) {
