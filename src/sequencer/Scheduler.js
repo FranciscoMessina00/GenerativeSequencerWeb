@@ -97,7 +97,10 @@ export class Scheduler {
    * timer jitter: a late tick emits the missed steps at their correct original times
    * instead of sliding the grid. And `duration` is read fresh every step, so a rate or
    * tempo change takes effect from the next step and never retimes a step already
-   * handed to the audio engine.
+   * handed to the audio engine. Swing below follows the same two rules: it perturbs
+   * only the local `audioTime` handed out this iteration, never `nextStepTime` itself
+   * (or the offset would compound onto every later step), and it is recomputed from
+   * `track.params.swing` fresh every step, same as duration.
    */
   pump() {
     if (!this.running) return;
@@ -110,7 +113,11 @@ export class Scheduler {
 
       while (clock.nextStepTime < horizon) {
         const duration = track.stepDuration(barSeconds);
-        const audioTime = clock.nextStepTime;
+        // trackStep, not the Euclidean stepIndex: it alternates cleanly forever
+        // regardless of pattern length (stepIndex glitches parity once per cycle
+        // when `steps` is odd) -- see Track.swingDelay for the offset itself.
+        const offBeat = clock.stepCount % 2 === 1;
+        const audioTime = clock.nextStepTime + track.swingDelay(offBeat, duration);
 
         const event = track.step(duration);
         this.bus.emit('step', {

@@ -146,6 +146,91 @@ test('a tempo change applies from the next step onward', () => {
   assert.ok(after.length > (beforeCount - 1) * 1.8, `${after.length} vs ${beforeCount}`);
 });
 
+test('swing at its default (0%) is a true no-op', () => {
+  // The default-param harness above already exercises this implicitly (every
+  // timing test runs at swing 0 without setting it), but pin it explicitly: if
+  // the schema default ever changed, every other timing test in this file would
+  // start failing for a reason that had nothing to do with what it is testing.
+  const h = harness({ bpm: 120 });
+  h.scheduler.start();
+  h.advance(4);
+  const expected = h.scheduler.stepDurationFor(0);
+  for (let i = 1; i < h.steps.length; i += 1) {
+    const gap = h.steps[i].audioTime - h.steps[i - 1].audioTime;
+    assert.ok(Math.abs(gap - expected) < 1e-9, `gap ${gap} at step ${i}`);
+  }
+});
+
+test('swing delays every other step and leaves the rest on the grid', () => {
+  const h = harness({ bpm: 120 });
+  h.bus.emit('param:change', { trackId: 0, key: 'swing', value: 0.5 });
+  h.scheduler.start();
+  h.advance(2);
+
+  const expected = h.scheduler.stepDurationFor(0);
+  const delay = 0.5 * 0.5 * expected; // swing * 0.5 * stepDuration
+  for (let i = 1; i < h.steps.length; i += 1) {
+    const gap = h.steps[i].audioTime - h.steps[i - 1].audioTime;
+    // trackStep is odd -> this step is the off-beat one carrying the delay;
+    // trackStep even -> back to the plain step gap, delay handed back.
+    const onBeat = h.steps[i].trackStep % 2 === 0;
+    const wanted = onBeat ? expected - delay : expected + delay;
+    assert.ok(Math.abs(gap - wanted) < 1e-9, `gap ${gap} at step ${i}, wanted ${wanted}`);
+  }
+});
+
+test('swing never reorders steps, at any amount up to 100%', () => {
+  for (const swing of [0, 0.1, 0.5, 0.9, 1]) {
+    const h = harness({ bpm: 90 });
+    h.bus.emit('param:change', { trackId: 0, key: 'swing', value: swing });
+    h.scheduler.start();
+    h.advance(3);
+    for (let i = 1; i < h.steps.length; i += 1) {
+      assert.ok(
+        h.steps[i].audioTime > h.steps[i - 1].audioTime,
+        `swing ${swing}: step ${i} did not come strictly after step ${i - 1}`,
+      );
+    }
+  }
+});
+
+test('a swing change is picked up from the next step, same as tempo', () => {
+  const h = harness({ bpm: 120 });
+  h.scheduler.start();
+  h.advance(1);
+  const beforeCount = h.steps.length;
+
+  h.bus.emit('param:change', { trackId: 0, key: 'swing', value: 0.5 });
+  h.advance(1);
+
+  const expected = h.scheduler.stepDurationFor(0);
+  const delay = 0.5 * 0.5 * expected;
+  const after = h.steps.slice(beforeCount);
+  for (let i = 1; i < after.length; i += 1) {
+    const gap = after[i].audioTime - after[i - 1].audioTime;
+    const onBeat = after[i].trackStep % 2 === 0;
+    const wanted = onBeat ? expected - delay : expected + delay;
+    assert.ok(Math.abs(gap - wanted) < 1e-9, `gap ${gap} at step ${i}`);
+  }
+});
+
+test('an odd step count does not glitch swing -- parity comes from trackStep, not the Euclidean position', () => {
+  const h = harness({ bpm: 120 });
+  h.bus.emit('param:change', { trackId: 0, key: 'steps', value: 5 });
+  h.bus.emit('param:change', { trackId: 0, key: 'swing', value: 0.5 });
+  h.scheduler.start();
+  h.advance(3); // several trips around a 5-step pattern
+
+  const expected = h.scheduler.stepDurationFor(0);
+  const delay = 0.5 * 0.5 * expected;
+  for (let i = 1; i < h.steps.length; i += 1) {
+    const gap = h.steps[i].audioTime - h.steps[i - 1].audioTime;
+    const onBeat = h.steps[i].trackStep % 2 === 0;
+    const wanted = onBeat ? expected - delay : expected + delay;
+    assert.ok(Math.abs(gap - wanted) < 1e-9, `gap ${gap} at step ${i} (trackStep ${h.steps[i].trackStep})`);
+  }
+});
+
 test('stop preserves the playhead; the generators resume where they left off', () => {
   const h = harness();
   h.bus.emit('param:change', { trackId: 0, key: 'steps', value: 8 });

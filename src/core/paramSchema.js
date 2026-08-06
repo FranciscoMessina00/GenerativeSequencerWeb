@@ -170,6 +170,10 @@ export const PARAM_SCHEMA = [
   // unmutes track 0 once at boot, and every saved patch carries the rest.
   { key: 'mute', label: 'Mute', group: 'Mixer', target: 'voice', type: 'toggle', def: true },
   { key: 'level', label: 'Level', group: 'Mixer', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.8, display: 'percent' },
+  // target: 'track', not 'voice' -- swing delays when a step is scheduled, which is
+  // Track/Scheduler's job, not a gain TrackVoice would set. Drawn on the tab beside
+  // mute/level even though it routes differently, which is why it stays in Mixer.
+  { key: 'swing', label: 'Swing', group: 'Mixer', target: 'track', min: 0, max: 1, step: 0.01, def: 0, display: 'percent' },
 
   // ---- Transport ----------------------------------------------------------
   // The only two global params in the schema. Everything above is per-track.

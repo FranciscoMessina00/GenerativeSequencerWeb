@@ -45,6 +45,7 @@ const tabs = new TrackTabs({
   trackCount: 4,
   muteSpec: paramSpec('mute'),
   levelSpec: paramSpec('level'),
+  swingSpec: paramSpec('swing'),
   getAudioTime: () => now,
   onSelect: (trackId) => selected.push(trackId),
   active: 0,
@@ -62,8 +63,8 @@ check('every tab has its own accent', accents.join(','), PAGE_PALETTES.map((p) =
 check('and they are all different', new Set(accents).size, 4);
 check('names come from the palette', tabs.lanes.map((l) => l.name).join(','), 'I,II,III,IV');
 
-log('\n-- the two keys it owns --');
-check('mute and level', tabs.keys().join(','), 'mute,level');
+log('\n-- the keys it owns --');
+check('mute, level and swing', tabs.keys().join(','), 'mute,level,swing');
 
 log('\n-- selection is reported, not performed --');
 tabs.lanes[2].element.click();
@@ -107,6 +108,19 @@ events.length = 0;
 tabs.lanes[1].level.setValue(0.5);
 check('setValue never echoes back onto the bus', emitted(), '');
 check('...but it does move the readout', tabs.lanes[1].level.valueEl.textContent, '50');
+
+log('\n-- swing, next to level, wired the same way --');
+events.length = 0;
+selected.length = 0;
+tabs.lanes[2].swing.onInput(0.25);
+check('dragging it emits for its own track', emitted(), 'swing@2=0.25');
+check('and did not select the tab', selected.length, 0);
+
+events.length = 0;
+tabs.setValue('swing', 0.75, 3);
+check('setValue never echoes back onto the bus', emitted(), '');
+check('...but it does move the readout', tabs.lanes[3].swing.valueEl.textContent, '75');
+check('default reads 0%', tabs.lanes[0].swing.valueEl.textContent, '0');
 
 log('\n-- mute state is per track, and reflected without emitting --');
 events.length = 0;

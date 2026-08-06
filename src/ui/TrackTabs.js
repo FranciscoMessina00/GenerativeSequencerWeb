@@ -53,15 +53,17 @@ export class TrackTabs {
    * @param {number} opts.trackCount
    * @param {object} opts.muteSpec  paramSchema entry for `mute`
    * @param {object} opts.levelSpec paramSchema entry for `level`
+   * @param {object} opts.swingSpec paramSchema entry for `swing`
    * @param {() => number} opts.getAudioTime the audio clock, for the bars
    * @param {(trackId: number) => void} opts.onSelect asked to switch page; the page
    *   swap itself belongs to the bootstrap, not here
    * @param {number} [opts.active]
    */
-  constructor({ bus, trackCount, muteSpec, levelSpec, getAudioTime, onSelect, active = 0 }) {
+  constructor({ bus, trackCount, muteSpec, levelSpec, swingSpec, getAudioTime, onSelect, active = 0 }) {
     this.bus = bus;
     this.muteSpec = muteSpec;
     this.levelSpec = levelSpec;
+    this.swingSpec = swingSpec;
     this.getAudioTime = getAudioTime;
     this.onSelect = onSelect;
     this.active = active;
@@ -119,9 +121,18 @@ export class TrackTabs {
     // and the drag captures the pointer, so the click would land here on release.
     level.element.addEventListener('pointerdown', (e) => e.stopPropagation());
 
+    const swing = new DragNumber({
+      spec: this.swingSpec,
+      format: (v) => `${Math.round(v * 100)}`,
+      describe: (v) => `${formatNumber(v * 100, 1)} percent`,
+      onInput: (v) => this.#emit(trackId, this.swingSpec.key, v),
+    });
+    swing.element.classList.add('dragnum--compact');
+    swing.element.addEventListener('pointerdown', (e) => e.stopPropagation());
+
     const head = document.createElement('div');
     head.className = 'tab__head';
-    head.append(muteButton, nameEl, level.element);
+    head.append(muteButton, nameEl, level.element, swing.element);
 
     const fill = document.createElement('i');
     fill.className = 'tab__fill';
@@ -134,7 +145,7 @@ export class TrackTabs {
     element.addEventListener('keydown', (e) => this.#onKeyDown(e, trackId));
 
     const lane = {
-      trackId, name, element, muteButton, nameEl, level, bar, fill,
+      trackId, name, element, muteButton, nameEl, level, swing, bar, fill,
       /** Steps decided but not yet audible -- see playheadProgress.promote. */
       queue: [],
       current: null,
@@ -168,9 +179,9 @@ export class TrackTabs {
     this.bus.emit('param:change', { trackId, key, value });
   }
 
-  /** The two schema keys this strip owns. */
+  /** The schema keys this strip owns. */
   keys() {
-    return [this.muteSpec.key, this.levelSpec.key];
+    return [this.muteSpec.key, this.levelSpec.key, this.swingSpec.key];
   }
 
   /**
@@ -188,6 +199,8 @@ export class TrackTabs {
       this.#renderMute(lane);
     } else if (key === this.levelSpec.key) {
       lane.level.setValue(value);
+    } else if (key === this.swingSpec.key) {
+      lane.swing.setValue(value);
     }
   }
 

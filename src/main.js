@@ -819,13 +819,14 @@ presets.loadFactoryPresets().then((list) => {
 // ---------------------------------------------------------------------------
 
 // Built last, because switching pages reaches everything above it. The strip owns
-// mute and level for all four tracks at once, so unlike every other widget it is
-// fed every track's changes rather than only the visible one's.
+// mute, level and swing for all four tracks at once, so unlike every other widget
+// it is fed every track's changes rather than only the visible one's.
 tabs = new TrackTabs({
   bus,
   trackCount: tracks.length,
   muteSpec: paramSpec('mute'),
   levelSpec: paramSpec('level'),
+  swingSpec: paramSpec('swing'),
   getAudioTime: () => audio.currentTime,
   onSelect: (trackId) => selectTrack(trackId),
   active: visibleTrack,

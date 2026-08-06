@@ -223,11 +223,11 @@ test('every entry in the shipped factory file is well-formed', () => {
   );
 });
 
-test('the shipped Default patch has not drifted from the schema defaults', () => {
+test('the shipped Blank patch has not drifted from the schema defaults', () => {
   // The file is generated from ParamStore's defaults. If someone changes a `def` in
   // paramSchema.js without regenerating, this is what says so.
-  const shipped = validateFactoryPresets(readFactory()).find((p) => p.name === 'Default');
-  assert.ok(shipped, 'a patch named "Default" must ship');
+  const shipped = validateFactoryPresets(readFactory()).find((p) => p.name === 'Blank');
+  assert.ok(shipped, 'a patch named "Blank" must ship');
   assert.equal(shipped.patch.tracks.length, TRACK_COUNT, 'one bag per track, or tracks go stale');
   assert.equal(shipped.patch.seeds.length, TRACK_COUNT, 'one seed per track');
   for (const seed of shipped.patch.seeds) {
@@ -246,14 +246,14 @@ test('the shipped Default patch has not drifted from the schema defaults', () =>
   );
 });
 
-test('loading the shipped Default patch returns the instrument to its defaults', () => {
+test('loading the shipped Blank patch returns the instrument to its defaults', () => {
   const { store } = harness({ trackCount: TRACK_COUNT });
   store.set('bpm', 210);
   store.set('steps', 3, 0);
   store.set('trigLoop', true, 0);
   store.set('mute', false, 3);
 
-  const shipped = validateFactoryPresets(readFactory()).find((p) => p.name === 'Default');
+  const shipped = validateFactoryPresets(readFactory()).find((p) => p.name === 'Blank');
   const seeds = store.load(shipped.patch);
 
   assert.deepEqual(seeds, shipped.patch.seeds);
@@ -309,7 +309,7 @@ test('a failed or malformed fetch resolves empty instead of throwing', async () 
     globalThis.fetch = () => Promise.resolve({ ok: true, json: async () => file });
     const list = await loadFactoryPresets('x');
     assert.equal(list.length, file.presets.length);
-    assert.equal(list[0].name, 'Default');
+    assert.equal(list[0].name, 'Blank');
   } finally {
     globalThis.fetch = original;
   }

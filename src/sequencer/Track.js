@@ -123,6 +123,24 @@ export class Track {
   }
 
   /**
+   * How much to delay one step for swing, given whether the scheduler has decided
+   * it falls on the off-beat.
+   *
+   * Capped at half a step, not an arbitrary choice: unswung positions are
+   * `0, D, 2D, 3D, ...`, so an off-beat step's swung position is always `< (i +
+   * 0.5)D` while the next (on-beat) step sits at `(i + 1)D` with no delay of its
+   * own -- ordering can never cross, for any swing amount, at any tempo or
+   * division. Delay-only rather than pulling the on-beat earlier, so a swung
+   * step's time is never earlier than the scheduler already promised elsewhere.
+   *
+   * Public, like stepDuration, because the scheduler is the one deciding parity
+   * (see Scheduler.pump()) and calls this once it has.
+   */
+  swingDelay(offBeat, stepDuration) {
+    return offBeat ? this.params.swing * 0.5 * stepDuration : 0;
+  }
+
+  /**
    * Ramp-time formula for glide. The ramp lasts one step minus 30 ms scaled by
    * magnitude, and the mode picks the curve: exponential in frequency (linear in
    * pitch-space) or plain linear. Zero magnitude skips the ramp, which also makes
