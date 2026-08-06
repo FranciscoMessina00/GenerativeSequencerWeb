@@ -21,6 +21,7 @@ const NON_PARAM_IDS = new Set([
   'reseed',
   'presetSlots',
   'presetLoad',
+  'presetExport',
   'ring',
   'trackTab',
 ]);

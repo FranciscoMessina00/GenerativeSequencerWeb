@@ -705,6 +705,7 @@ window.addEventListener('keydown', (e) => {
 const presetSlots = /** @type {HTMLSelectElement} */ (document.getElementById('preset-slots'));
 const presetStatus = document.getElementById('preset-status');
 const presetLoad = /** @type {HTMLButtonElement} */ (document.getElementById('preset-load'));
+const presetExport = /** @type {HTMLButtonElement} */ (document.getElementById('preset-export'));
 
 /** name -> patch, filled in once the factory file has been fetched. */
 const factory = new Map();
@@ -777,6 +778,27 @@ presetLoad.addEventListener('click', () => {
   say('loaded');
 });
 
+// A button for the same thing presets.js's own header tells a developer to do from
+// the console -- dial the instrument in, then get a patch shaped to paste straight
+// into presets/factory.json. Downloads a file rather than writing anywhere in the
+// browser, which keeps the "nothing is saved locally" promise in presets.js's header:
+// this is a developer's manual export, not the instrument acquiring persistence.
+presetExport.addEventListener('click', () => {
+  const name = window.prompt('Patch name:', presetSlots.value || 'Untitled');
+  if (!name) return; // cancelled, or typed nothing worth saving under
+  const patch = store.snapshot(rngs.map((r) => r.seed));
+  const entry = { name, patch };
+  const blob = new Blob([presets.toJSON(entry)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `${name.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'patch'}.json`,
+  });
+  link.click();
+  URL.revokeObjectURL(url);
+  say('exported');
+});
+
 // Disabled until the fetch lands, so the button cannot be pressed with nothing
 // behind it. The instrument is already playable meanwhile -- it boots on the schema
 // defaults, which is exactly what the shipped patch holds.
@@ -832,10 +854,10 @@ applyBootDefaults(store);
 //   __seq.store.set('steps', 9, 2)      edits track 3 without switching to it
 //   __seq.selectTrack(1)                switches page, exactly as the tab does
 //
-// It is also how a new factory patch is authored -- dial the instrument in, then
-// paste the output into presets/factory.json as another entry:
+// Authoring a new factory patch is the Export button in the header; this is the same
+// thing, for scripting it instead of clicking:
 //
-//   __seq.presets.toJSON(__seq.store.snapshot(__seq.rngs.map((r) => r.seed)))
+//   __seq.presets.toJSON({ name: '...', patch: __seq.store.snapshot(__seq.rngs.map((r) => r.seed)) })
 /** @type {any} */ (window).__seq = {
   bus, store, tracks, rngs, audio, scheduler, presets, applySnapshot, modulations,
   selectTrack, tabs, paletteFor, get visibleTrack() { return visibleTrack; },

@@ -15,13 +15,14 @@
  *
  * AUTHORING A NEW ONE
  *
- * Dial the instrument in, then from the devtools console:
- *
- *     __seq.presets.toJSON(__seq.store.snapshot(__seq.rng.seed))
- *
- * and paste the result into `presets/factory.json` as a new
- * `{ "name": "...", "patch": { ... } }` entry. Including the seed is what makes the
+ * Dial the instrument in, then click Export in the header: it downloads a
+ * `{ "name": "...", "patch": { ... } }` file, ready to paste into
+ * `presets/factory.json` as a new array entry. Including the seed is what makes the
  * patch replay note for note rather than merely restoring the same settings.
+ *
+ * The same thing is reachable from the devtools console, for scripting it:
+ *
+ *     __seq.presets.toJSON({ name: '...', patch: __seq.store.snapshot(__seq.rngs.map((r) => r.seed)) })
  */
 
 /** Fetched relative to the document, so it works under a project subpath. */

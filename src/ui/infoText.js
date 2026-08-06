@@ -130,5 +130,6 @@ export const INFO_TEXT = {
   reseed: 'Reseed — new random seed, so the generators take a different path.',
   presetSlots: 'Patch — pick one of the factory patches to load.',
   presetLoad: 'Load — apply the selected patch, including its random seed.',
+  presetExport: 'Export — download the current patch as JSON, ready to paste into presets/factory.json.',
   ring: 'Step Ring — the Euclid pattern, the playhead, and which steps actually triggered.',
 };

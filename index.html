@@ -12,12 +12,14 @@
       <h1>Generative Sequencer <span class="sub">modal string</span></h1>
       <p class="status" id="status">audio not started</p>
     </div>
-    <!-- Read-only: patches ship with the instrument, nothing is saved locally.
-         See src/core/presets.js. -->
+    <!-- Read-only at runtime: patches ship with the instrument, nothing is saved
+         locally. Export downloads a file for a developer to paste into
+         presets/factory.json by hand -- see src/core/presets.js. -->
     <div class="patch">
       <label class="patch__label" for="preset-slots">Patch</label>
       <select id="preset-slots" aria-label="Factory patches" data-info="presetSlots"></select>
       <button id="preset-load" data-info="presetLoad">Load</button>
+      <button id="preset-export" data-info="presetExport">Export</button>
       <span class="patch__status" id="preset-status" aria-live="polite"></span>
     </div>
 
