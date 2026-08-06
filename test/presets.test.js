@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/EventBus.js';
 import { Rng } from '../src/core/rng.js';
 import { ParamStore, SNAPSHOT_VERSION, TRACK_COUNT } from '../src/core/ParamStore.js';
+import { applyBootDefaults } from '../src/core/bootDefaults.js';
 import { paramSpec } from '../src/core/paramSchema.js';
 import { Track } from '../src/sequencer/Track.js';
 import { readFileSync } from 'node:fs';
@@ -233,10 +234,11 @@ test('the shipped Default patch has not drifted from the schema defaults', () =>
     assert.equal(typeof seed, 'number', 'a factory patch needs fixed seeds');
   }
 
-  // Defaults, with the one deliberate exception: track 0 is audible. A patch whose
-  // every track was muted would load as silence, since `mute` defaults to true.
+  // Schema defaults plus the between-track ones -- the same function the bootstrap
+  // and the generator script call, so the three cannot disagree about what a fresh
+  // instrument looks like. See core/bootDefaults.js.
   const defaults = new ParamStore({ trackCount: TRACK_COUNT });
-  defaults.set('mute', false, 0);
+  applyBootDefaults(defaults);
   assert.deepEqual(
     shipped.patch,
     defaults.snapshot(shipped.patch.seeds),

@@ -489,11 +489,28 @@ main {
 }
 
 /* Not part of the heading's own ALL-CAPS styling -- the target's label is a real
-   param name (e.g. "Grain Dry/Wet") and should read normally, not shout. */
-.group h2 .lfo__target-row {
+   param name (e.g. "Grain Dry/Wet") and should read normally, not shout. Same for the
+   instrument selector, whose options are proper names ("Modal String"). */
+.group h2 .lfo__target-row,
+.group h2 .instrument-pick {
   text-transform: none;
   letter-spacing: normal;
   font-weight: 400;
+}
+
+/* The instrument selector, which InstrumentPanel moves onto whichever instrument
+   panel is showing. Its own caption is dropped: the heading beside it already names
+   the instrument, so "Instrument: Kick" under a "KICK" heading says it twice. */
+.group h2 .instrument-pick {
+  /* Overrides .dropdown's column stack -- there is only the select left to place. */
+  display: block;
+  /* Cancels the heading's baseline alignment, which a select does not share with text. */
+  align-self: center;
+}
+.group h2 .instrument-pick .dropdown__label { display: none; }
+.group h2 .instrument-pick .dropdown__select {
+  padding: 2px 4px;
+  font-size: 11px;
 }
 
 .control { margin-bottom: 11px; }

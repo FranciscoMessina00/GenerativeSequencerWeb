@@ -78,6 +78,25 @@ export const INFO_TEXT = {
   damping: 'Damping — how much faster the high modes fade than the low ones. Higher is duller.',
   pluckSoftness: 'Pluck Softness — a hard pick excites the high modes, a soft one leaves them out.',
 
+  // ---- Percussion ---------------------------------------------------------
+  // Every colour is a tilt: low is dark, high is bright, halfway is flat.
+  kickDecay: 'Kick Decay — how long the drum rings after the beater hits it.',
+  kickSweep: 'Kick Sweep Amount — how far above its tuning the pitch starts before falling to it.',
+  kickSweepTime: 'Kick Sweep Time — how fast that pitch drop happens. Short is a click, long is a boom.',
+  kickNoise: 'Kick Noise Amount — a burst of noise on the attack, for the sound of the beater itself.',
+  kickNoiseColor: 'Kick Noise Colour — tilts that attack noise from dark to bright.',
+  snareDecay: 'Snare Decay — how long the wires rattle after the hit.',
+  snareNoise: 'Snare Noise Amount — level of the wire rattle, the half that makes it a snare.',
+  snareNoiseColor: 'Snare Noise Colour — tilts the rattle from dark to bright.',
+  snareTone: 'Snare Body Amount — level of the tuned shell under the rattle.',
+  snareBodyDecay: 'Snare Body Decay — how long that shell rings. Shorter reads as a tighter drum.',
+  hatDecay: 'Hat Decay — how long the cymbal rings. Short is closed, longer is open.',
+  hatNoise: 'Hat Noise Amount — blends the cymbal between a metallic oscillator cluster (low) and pure shaped noise (high).',
+  hatNoiseColor: 'Hat Noise Colour — tilts the cymbal from dark to bright.',
+
+  // ---- Which instrument the visible track plays ---------------------------
+  instrument: 'Instrument — which voice this track plays. Each one keeps its own settings.',
+
   // ---- Granulator ---------------------------------------------------------
   grainPitch: 'Grain Pitch — playback rate of the granular layer. 1 is the original pitch.',
   grainDryWet: 'Grain Dry/Wet — balance between the plain string and its granular echo.',

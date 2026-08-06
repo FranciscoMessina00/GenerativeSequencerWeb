@@ -1,4 +1,5 @@
 import { PARAM_SCHEMA } from '../core/paramSchema.js';
+import { instrumentById } from '../audio/instruments.js';
 import { SCALE_NAMES } from '../sequencer/scales.js';
 import { noteValueLabel, stepModById } from '../sequencer/stepDivision.js';
 import { DragNumber } from './DragNumber.js';
@@ -22,11 +23,24 @@ export class UIController {
     this.dragNumbers = new Map();
     /** key -> { wrapper, lo, hi, spec }, for setModRange -- range-input keys only. */
     this.modTicks = new Map();
+    /**
+     * group name -> the <section> and <h2> renderGroups built for it.
+     *
+     * Kept because a caller sometimes needs a handle on a whole group rather than on
+     * one control: the four instrument panels are shown and hidden as units, and the
+     * instrument selector moves between their headings. See ui/InstrumentPanel.js.
+     *
+     * @type {Map<string, HTMLElement>}
+     */
+    this.sections = new Map();
+    /** @type {Map<string, HTMLElement>} */
+    this.headings = new Map();
   }
 
   /** Human-readable value for the enum-ish params, which are integers on the wire. */
   #formatValue(spec, value) {
     if (spec.display === 'scale') return SCALE_NAMES[Math.round(value) - 1] ?? '?';
+    if (spec.display === 'instrument') return instrumentById(value).name;
     if (spec.display === 'noteValue') return noteValueLabel(value);
     if (spec.display === 'stepMod') return stepModById(value).name;
     if (spec.type === 'toggle') return value ? 'on' : 'off';
@@ -80,6 +94,9 @@ export class UIController {
       if (extra) section.appendChild(extra);
       for (const spec of specs) section.appendChild(this.#buildControl(spec));
       container.appendChild(section);
+
+      this.sections.set(group, section);
+      this.headings.set(group, heading);
     }
   }
 

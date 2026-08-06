@@ -1,6 +1,6 @@
 # Web Generative Sequencer
 
-Four generative Euclidean sequencers driving four modal string voices off one
+Four generative Euclidean sequencers driving a modal string and a drum kit off one
 clock, built on the **Web Audio API**.
 
 > Zero build step, plain ES modules, no dependencies.
@@ -36,11 +36,15 @@ index.html
         │
         ├─ audio/               ← Audio rendering
         │   ├─ AudioEngine.js  ←   AudioContext, master limiter & fader
-        │   ├─ TrackVoice.js   ←   One track's string + granulator + trim
+        │   ├─ instruments.js  ←   The registry: id → processor, group, note-on
+        │   ├─ TrackVoice.js   ←   One track's instrument + granulator + trim
         │   ├─ modal/
         │   │   └─ modalModel.js ←  String physics (pure functions)
+        │   ├─ percussion/
+        │   │   └─ percussionModel.js ← Kick/snare/hat mappings (pure)
         │   └─ worklets/
         │       ├─ modal-processor.js    ← 16-voice resonator bank
+        │       ├─ percussion-processors.js ← Kick, snare and hi-hat
         │       ├─ granulator-processor.js ← Live granulator + limiter
         │       └─ master-clip-processor.js ← Limiter on the four-track sum
         │
@@ -48,6 +52,7 @@ index.html
             ├─ UIController.js ←   Builds control surface from schema
             ├─ EuclidView.js   ←   Canvas Euclidean ring display
             ├─ TrackTabs.js    ←   The four track pages + playhead bars
+            ├─ InstrumentPanel.js ← Which instrument's controls are showing
             ├─ palette.js      ←   One colour scheme per page
             ├─ playheadProgress.js ← Fractional playhead position (pure)
             ├─ icons.js        ←   Line-art SVG glyphs
@@ -63,10 +68,47 @@ index.html
             └─ noteNames.js
 ```
 
+## Instruments
+
+Each track plays one of four voices — a modal string, a kick, a snare, a hi-hat —
+picked by the selector on the instrument panel's heading. Tracks start as a string
+plus a drum kit, but any track can be any instrument.
+
+[`src/audio/instruments.js`](src/audio/instruments.js) is the registry, and it is the
+only place that knows an instrument's parts fit together: its name, the worklet
+processor that sounds it, the control group that holds its parameters, and **how a
+step becomes a note-on**. That last field is what makes the rest polymorphic —
+`TrackVoice.noteOn` is a one-line router, so adding an instrument means adding an
+entry and a processor rather than editing a switch in three places. Like
+`MOD_TARGETS`, the array index is the stored value, so it is append-only.
+
+Parameters are namespaced per instrument (`kickDecay`, `snareDecay`, `hatDecay`)
+rather than shared. One schema row cannot hold two ranges: a string rings for
+0.25–3 s and a hi-hat's decay tops out below a snare's floor. Namespacing also means
+a track's bag keeps every instrument's settings, so switching voice and back loses
+nothing.
+
+Every `*NoiseColor` is a **tilt**, not a cutoff — 0 dark, 1 bright, 0.5 flat — so the
+knob changes timbre rather than volume. That needed care: the two halves of a one-pole
+split carry unequal noise power (the bright half keeps everything up to Nyquist), so
+crossfading them with equal-power gains alone moved the level by 2.5×. Each half is
+normalised to unit variance first, using the closed-form variance of white noise
+through `y += a(x − y)`.
+
+All three percussion voices are tuned by the step's note, so the Pitch panel does
+something on every track — it sets the kick's sweep target, the snare's shell, and
+where the hi-hat's colour hinges.
+
+Only one instrument panel is on screen at a time. All four are rendered once and the
+rest hidden, rather than rebuilt on each switch: `UIController` holds live references
+to every control it built, so tearing panels down would invalidate them and take the
+LFO's sweep indicators with them. The selector is one dropdown that *moves* onto the
+visible heading, because there is only one thing being chosen.
+
 ## Tracks
 
 Four tracks run in parallel off one clock. Each owns its own rhythm, pitch,
-velocity, LFO, string and granulator; what they share is the tempo, the master
+velocity, LFO, instrument and granulator; what they share is the tempo, the master
 fader, and the moment they start.
 
 The tab strip above the columns switches which track's controls are on screen —
@@ -325,10 +367,14 @@ document-relative, so the site works unchanged under a project subpath like
 Each track gets its own chain, and they sum into one fader:
 
 ```
-per track:  modal-processor → granulator-processor → trim (mute × level)
-                                                       ↓
-                          master-clip-processor → master gain → out
+per track:  <instrument> → granulator-processor → trim (mute × level)
+                                                    ↓
+                       master-clip-processor → master gain → out
 ```
+
+Only the source varies. The granulator stays in every chain because it costs nothing
+when unused — `grainDryWet` defaults to −1, which that processor treats as a true
+bypass — so a kick can be granulated without the graph changing.
 
 One `AudioContext` for all four — four would mean four hardware clocks with no way to
 align them. The master limiter is there because each granulator already bounds *its
@@ -389,7 +435,7 @@ npm run serve    # Python HTTP server on port 8080
 ## Test
 
 ```bash
-npm test         # Node native test runner, 233 tests, no dependencies
+npm test         # Node native test runner, 262 tests, no dependencies
 ```
 
 The custom controls need a DOM, so they are checked by mounted pages rather than in Node.
@@ -418,8 +464,16 @@ npm i -D typescript && npm run typecheck
 
 Nothing is ever emitted — this is checking, not building.
 
-The worklets cannot run under Node, and a runtime error inside one is silent —
-the node simply outputs zeros. `test/browser/selftest.html` therefore renders the
-real graph through an `OfflineAudioContext` and inspects the samples, so DSP bugs
-surface as numbers rather than as unexplained silence. Serve the project root and
-open `/test/browser/selftest.html`.
+The worklets cannot run under Node, and a runtime error inside one is silent — the
+node simply outputs zeros, and every UI check still passes. So DSP is checked by
+rendering the real graph through an `OfflineAudioContext` and measuring the samples:
+`/test/browser/percussion-render-check.html` for the drum voices and the string's
+note-on path, and the older `/test/browser/selftest.html` for the string's physics.
+
+Those two differ in one important way. Offline rendering runs as fast as the CPU
+allows, so it can pass a note's start frame *before* the note has crossed to the audio
+thread — which is why `selftest.html` carries a KNOWN UNRELIABLE banner and reports
+zeros for voices that work. The percussion page fixes it with the handshake that
+banner asks for: post the note, then `{type:'ping'}`, and wait for the `pong`. Port
+order is guaranteed, so the pong proves the note was handled. Both `modal-processor`
+and `percussion-processors` answer a ping; nothing in production sends one.

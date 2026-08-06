@@ -1,32 +1,46 @@
-import { buildNote, midiToHz, modeGains } from './modal/modalModel.js';
+import { instrumentById } from './instruments.js';
 import { clampParam, defaultsFor } from '../core/paramSchema.js';
 
 /**
- * One track's own signal chain, from its string to its contribution to the mix.
+ * One track's own signal chain, from its instrument to its contribution to the mix.
  *
- *   modal-processor -> granulator-processor -> trim -> (the engine's master clip)
+ *   <instrument> -> granulator-processor -> trim -> (the engine's master clip)
  *
- * Every track gets its own, so four pages can hold four different timbres and
+ * Every track gets its own, so four pages can hold four different instruments with
  * four different granular settings. What they share is the AudioContext, the
  * master limiter and the master fader -- all of which belong to AudioEngine,
  * which is why this class takes a context and a destination rather than making
  * either.
+ *
+ * Only the source varies. The granulator stays in the chain for every instrument
+ * because it costs nothing when unused -- `grainDryWet` defaults to −1, which that
+ * processor treats as a true bypass -- and it means a kick can be granulated without
+ * any of this changing.
  *
  * The constructor holds params only and builds no nodes: a browser refuses to
  * start an AudioContext outside a user gesture, so a patch can be loaded and
  * every control dialled in long before there is a graph to write to. attach()
  * is where the nodes appear, and it flushes whatever accumulated meanwhile.
  *
- * Physics happens on the main thread and the worklet receives finished mode
- * tables, so the model stays in one testable place and a note-on is a few hundred
- * bytes rather than a parameter negotiation.
+ * Which instrument sounds, and how a step becomes a note-on, are both looked up in
+ * audio/instruments.js rather than decided here -- so this class stays a router and
+ * adding an instrument does not touch it.
  */
+
+/** Every instrument is a mono source with no input. */
+const SOURCE_OPTIONS = {
+  numberOfInputs: 0,
+  numberOfOutputs: 1,
+  outputChannelCount: [1],
+};
+
 export class TrackVoice {
   constructor(trackId = 0) {
     this.trackId = trackId;
     this.params = defaultsFor('voice');
     this.context = null;
-    this.modalNode = null;
+    /** The instrument's own processor node, rebuilt when the instrument changes. */
+    this.source = null;
     this.granulatorNode = null;
     this.trim = null;
     this.ready = false;
@@ -42,12 +56,6 @@ export class TrackVoice {
     this.context = context;
 
     // Mono throughout; the destination node up-mixes to stereo.
-    this.modalNode = new AudioWorkletNode(context, 'modal-processor', {
-      numberOfInputs: 0,
-      numberOfOutputs: 1,
-      outputChannelCount: [1],
-    });
-
     this.granulatorNode = new AudioWorkletNode(context, 'granulator-processor', {
       numberOfInputs: 1,
       numberOfOutputs: 1,
@@ -59,12 +67,37 @@ export class TrackVoice {
     this.trim = context.createGain();
 
     // A per-track FX insert would go between the granulator and the trim.
-    this.modalNode.connect(this.granulatorNode);
     this.granulatorNode.connect(this.trim);
     this.trim.connect(destination);
 
+    this.#buildSource();
+
     this.ready = true;
     this.#pushParams();
+  }
+
+  /** The node for whichever instrument this track currently plays. */
+  #buildSource() {
+    const instrument = instrumentById(this.params.instrument);
+    this.source = new AudioWorkletNode(this.context, instrument.processor, SOURCE_OPTIONS);
+    this.source.connect(this.granulatorNode);
+  }
+
+  /**
+   * Swap the instrument.
+   *
+   * Panic before disconnecting: an orphaned node keeps rendering its tail into nothing,
+   * and on a long string decay that is seconds of CPU spent on silence. Disconnecting
+   * without it also leaves the old voice mid-ring if it is ever reconnected.
+   *
+   * The granulator's buffer is deliberately left alone -- it holds a moment of the
+   * previous instrument, which fades out of the buffer on its own within three seconds
+   * and is a far smaller artefact than a rebuilt granulator's silence would be.
+   */
+  #swapSource() {
+    this.source.port.postMessage({ type: 'panic' });
+    this.source.disconnect();
+    this.#buildSource();
   }
 
   get currentTime() {
@@ -85,9 +118,11 @@ export class TrackVoice {
       this.#pushTrim();
     } else if (key === 'grainPitch' || key === 'grainDryWet') {
       this.#pushGranulatorParams();
+    } else if (key === 'instrument') {
+      this.#swapSource();
     }
-    // The remaining voice params (modes, stiffness, decay, damping, softness) are
-    // read when the next note is built, so they need no message.
+    // Every remaining voice param is latched when the next hit is built, so it needs
+    // no message -- see the buildMessage functions in audio/instruments.js.
   }
 
   #pushParams() {
@@ -107,64 +142,28 @@ export class TrackVoice {
   }
 
   /**
-   * Sound one step.
+   * Sound one step, on whichever instrument this track plays.
    *
-   * The step carries the note it decided on plus the note before it, because both
-   * glides in this instrument ramp *from the previous value into the current one*
-   * across the step.
+   * A router: the instrument's own builder turns the step into the message its
+   * processor understands, so this method needs no knowledge of any of them. Each
+   * builder reaches only for the params its instrument owns, which is what lets a
+   * track carry settings for all four at once.
    *
    * A muted track still builds and sends its note. The trim is what silences it,
-   * so unmuting mid-phrase reveals a string that was already ringing rather than
-   * starting from nothing -- and the voice pool's behaviour does not change with
-   * mute state.
+   * so unmuting mid-phrase reveals an instrument that was already ringing rather
+   * than starting from nothing -- and the voice pool's behaviour does not change
+   * with mute state.
    */
   noteOn(step) {
     if (!this.ready || !step.triggered) return;
-
-    const p = this.params;
-    const note = buildNote({
-      midinote: step.note,
-      velocity: step.velocity,
-      pluckPosition: step.mod,
-      modes: p.modes,
-      stiffness: p.stiffness,
-      damping: p.damping,
-      decayScale: p.decay,
-      sampleRate: this.context.sampleRate,
-    });
-
-    // Gains at both ends of the plucking-position ramp. With no ramp the two are
-    // identical and the worklet's blend is a no-op.
-    const gainsTo = note.gains;
-    const gainsFrom =
-      step.modTime > 0 ? modeGains(note.count, step.prevMod) : gainsTo;
-
-    this.modalNode.port.postMessage({
-      type: 'noteOn',
-      startTime: step.audioTime,
-      count: note.count,
-      ratios: note.ratios,
-      decays: note.decays,
-      gainsFrom,
-      gainsTo,
-
-      f0From: step.glideTime > 0 ? midiToHz(step.prevNote) : midiToHz(step.note),
-      f0To: midiToHz(step.note),
-      glideTime: step.glideTime,
-      glideExponential: step.glideExponential,
-
-      mFrom: step.prevMod,
-      mTo: step.mod,
-      modTime: step.modTime,
-      modExponential: step.modExponential,
-
-      velocity: step.velocity,
-      pluckSoftness: p.pluckSoftness,
-    });
+    const instrument = instrumentById(this.params.instrument);
+    this.source.port.postMessage(
+      instrument.buildMessage(step, this.params, this.context.sampleRate),
+    );
   }
 
   /** Silence every ringing voice on this track alone. */
   panic() {
-    this.modalNode?.port.postMessage({ type: 'panic' });
+    this.source?.port.postMessage({ type: 'panic' });
   }
 }

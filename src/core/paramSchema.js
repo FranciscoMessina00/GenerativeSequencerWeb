@@ -95,7 +95,18 @@ export const PARAM_SCHEMA = [
   // An index into MOD_TARGETS, where 0 is "not mapped". Stored as a number so it
   // rides the normal snapshot path; `max` is written literally to keep this file
   // import-free, and a test pins it to MOD_TARGETS.length - 1 so the two cannot drift.
-  { key: 'lfoTarget', label: 'LFO Target', group: 'Modulation', target: 'modulation', min: 0, max: 12, step: 1, def: 0 },
+  { key: 'lfoTarget', label: 'LFO Target', group: 'Modulation', target: 'modulation', min: 0, max: 25, step: 1, def: 0 },
+
+  // ---- Which instrument this track plays ----------------------------------
+  // An index into INSTRUMENTS (src/audio/instruments.js), stored as a number so it
+  // rides the normal snapshot path -- the same shape `scale` uses, and drawn by the
+  // same Dropdown widget. `group: 'Instrument'` is absent from main.js's
+  // CONTROL_GROUPS, so it never renders as a slider; the selector draws it, and moves
+  // between the four instrument panels as the visible track changes.
+  //
+  // Defaults to 0 for every track; bootDefaults.js is what makes the four tracks
+  // differ, since defaultsFor() cannot.
+  { key: 'instrument', label: 'Instrument', group: 'Instrument', target: 'voice', values: [0, 1, 2, 3], min: 0, max: 3, step: 1, def: 0, display: 'instrument' },
 
   // ---- Modal string voice -------------------------------------------------
   // Pluck position lives here, not under Modulation -- it is a property of *where*
@@ -111,6 +122,39 @@ export const PARAM_SCHEMA = [
   { key: 'decay', label: 'Decay', group: 'String', target: 'voice', min: 0.25, max: 3, step: 0.01, def: 1 },
   { key: 'damping', label: 'Damping (mode rolloff)', group: 'String', target: 'voice', min: 0, max: 1.5, step: 0.01, def: 0.5 },
   { key: 'pluckSoftness', label: 'Pluck Softness', group: 'String', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.35 },
+
+  // ---- Percussion ---------------------------------------------------------
+  // Namespaced per instrument rather than sharing a `decay` and a `noiseColor`
+  // between them, because one schema row cannot hold two ranges: the string rings for
+  // 0.25-3 s and a kick for 0.05-2, and a hi-hat's decay tops out shorter than a
+  // snare's floor. Namespacing also means a track's bag keeps every instrument's
+  // settings, so switching voice and back loses nothing.
+  //
+  // Every `*NoiseColor` is a *tilt*, not a cutoff: 0 is a lowpassed copy of the noise,
+  // 1 a highpassed one, 0.5 flat. A tilt keeps loudness roughly constant across the
+  // sweep, so the control reads as timbre rather than as volume.
+
+  // Kick: a sine whose pitch falls from `note x sweep` to `note` over sweepTime,
+  // with an optional noise burst on the attack.
+  { key: 'kickDecay', label: 'Kick Decay', group: 'Kick', target: 'voice', min: 0.05, max: 2, step: 0.01, def: 0.4 },
+  // A multiplier on the starting pitch, so the sweep depth is independent of tuning.
+  { key: 'kickSweep', label: 'Kick Sweep Amount', group: 'Kick', target: 'voice', min: 1, max: 8, step: 0.05, def: 3 },
+  { key: 'kickSweepTime', label: 'Kick Sweep Time', group: 'Kick', target: 'voice', min: 0.005, max: 0.2, step: 0.001, def: 0.05 },
+  { key: 'kickNoise', label: 'Kick Noise Amount', group: 'Kick', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.15, display: 'percent' },
+  { key: 'kickNoiseColor', label: 'Kick Noise Colour', group: 'Kick', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.6, display: 'percent' },
+
+  // Snare: two resonators tuned from the note for the shell, plus a noise layer.
+  // Two independent amounts rather than one crossfade, so either layer can be soloed.
+  { key: 'snareDecay', label: 'Snare Decay', group: 'Snare', target: 'voice', min: 0.03, max: 1.2, step: 0.01, def: 0.25 },
+  { key: 'snareNoise', label: 'Snare Noise Amount', group: 'Snare', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.7, display: 'percent' },
+  { key: 'snareNoiseColor', label: 'Snare Noise Colour', group: 'Snare', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.55, display: 'percent' },
+  { key: 'snareTone', label: 'Snare Body Amount', group: 'Snare', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.4, display: 'percent' },
+  { key: 'snareBodyDecay', label: 'Snare Body Decay', group: 'Snare', target: 'voice', min: 0.02, max: 0.6, step: 0.01, def: 0.12 },
+
+  // Hi-hat: filtered noise, band-centred on the note, with a fast decay.
+  { key: 'hatDecay', label: 'Hat Decay', group: 'Hi-hat', target: 'voice', min: 0.01, max: 0.6, step: 0.005, def: 0.08 },
+  { key: 'hatNoise', label: 'Hat Noise Amount', group: 'Hi-hat', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.9, display: 'percent' },
+  { key: 'hatNoiseColor', label: 'Hat Noise Colour', group: 'Hi-hat', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.8, display: 'percent' },
 
   // ---- Granulator ---------------------------------------------------------
   { key: 'grainPitch', label: 'Grain Pitch', group: 'Granulator', target: 'voice', min: 0.5, max: 2, step: 0.01, def: 1 },

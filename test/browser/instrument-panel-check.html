@@ -1,0 +1,135 @@
+<!doctype html>
+<!-- Manual check for the instrument panel: all four instruments' controls rendered
+     once, exactly one showing, and the single selector moving onto whichever heading
+     is visible. Also that the selector's own caption is suppressed (the heading beside
+     it already names the instrument) and that an unknown id still leaves a usable
+     panel rather than hiding everything.
+
+     Browser-only: the whole mechanism is `hidden` versus a computed display, and a
+     node being relocated by being appended somewhere else. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+#controls{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;max-width:1000px;}</style>
+</head>
+<body>
+<div id="controls"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { UIController } from '../../src/ui/UIController.js';
+import { InstrumentPanel } from '../../src/ui/InstrumentPanel.js';
+import { INSTRUMENTS, INSTRUMENT_GROUPS } from '../../src/audio/instruments.js';
+import { paramSpec } from '../../src/core/paramSchema.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const bus = new EventBus();
+const events = [];
+bus.on('param:change', (e) => events.push(e));
+
+const ui = new UIController({ bus });
+ui.renderGroups(document.getElementById('controls'), INSTRUMENT_GROUPS);
+
+const picks = [];
+const panel = new InstrumentPanel({
+  spec: paramSpec('instrument'),
+  sections: ui.sections,
+  headings: ui.headings,
+  onInput: (value) => picks.push(value),
+});
+
+/** Asserted on computed display, not on the attribute: the point is being off screen. */
+const shown = (group) => getComputedStyle(ui.sections.get(group)).display !== 'none';
+const visibleGroups = () => INSTRUMENT_GROUPS.filter(shown);
+const pickHost = () => panel.dropdown.element.closest('.group')?.querySelector('h2')?.firstChild?.textContent;
+
+log('-- renderGroups records what it built --');
+check('a section per instrument group', ui.sections.size, INSTRUMENT_GROUPS.length);
+check('and a heading per group', ui.headings.size, INSTRUMENT_GROUPS.length);
+check('the groups are the registry\'s', [...ui.sections.keys()].join(','), INSTRUMENT_GROUPS.join(','));
+// Every instrument's controls exist from the start; only visibility changes.
+for (const group of INSTRUMENT_GROUPS) {
+  const controls = ui.sections.get(group).querySelectorAll('.control').length;
+  check(`${group} rendered its controls`, controls > 0, 'true');
+}
+
+log('\n-- exactly one panel shows, and it is the default instrument --');
+check('one visible', visibleGroups().length, 1);
+check('...and it is the first instrument\'s', visibleGroups()[0], INSTRUMENTS[0].group);
+check('the selector sits on that heading', pickHost(), INSTRUMENTS[0].group);
+check('the selector reads the default', panel.dropdown.selectEl.value, String(paramSpec('instrument').def));
+check('every instrument is offered', panel.dropdown.selectEl.options.length, INSTRUMENTS.length);
+check('by name, not by number', panel.dropdown.selectEl.options[1].textContent, INSTRUMENTS[1].name);
+
+log('\n-- switching moves both the panel and the selector --');
+for (const instrument of INSTRUMENTS) {
+  panel.setInstrument(instrument.id);
+  check(`${instrument.name}: only its panel shows`, visibleGroups().join(','), instrument.group);
+  check(`${instrument.name}: the selector came with it`, pickHost(), instrument.group);
+  // One selector, always -- the mechanism is a moved node, not four hidden copies.
+  check(`${instrument.name}: still exactly one selector`,
+    document.querySelectorAll('.instrument-pick').length, 1);
+}
+
+log('\n-- the caption is suppressed, since the heading already says it --');
+panel.setInstrument(1);
+check('the label is off screen',
+  getComputedStyle(panel.dropdown.element.querySelector('.dropdown__label')).display, 'none');
+check('but the select itself is not',
+  getComputedStyle(panel.dropdown.selectEl).display !== 'none', 'true');
+// It must not inherit the heading's shouting: "Modal String" is a name, not a heading.
+check('and it does not inherit ALL CAPS',
+  getComputedStyle(panel.dropdown.element).textTransform, 'none');
+
+log('\n-- the keys it owns, and the setValue contract --');
+check('one key', panel.keys().join(','), 'instrument');
+events.length = 0;
+panel.setValue(3);
+check('setValue never emits', events.length, 0);
+check('...but it moves the panel', visibleGroups().join(','), INSTRUMENTS[3].group);
+check('...and the dropdown with it', panel.dropdown.selectEl.value, '3');
+
+log('\n-- a gesture reports out rather than acting --');
+panel.setInstrument(0);
+picks.length = 0;
+panel.dropdown.selectEl.value = '2';
+panel.dropdown.selectEl.dispatchEvent(new Event('change'));
+check('the change is reported', picks.join(','), '2');
+check('...and nothing moved on its own', visibleGroups().join(','), INSTRUMENTS[0].group);
+
+log('\n-- an unknown instrument still leaves a usable panel --');
+// A patch from a future build naming an instrument this one lacks must not blank the
+// panel; it falls back the same way instrumentById does for the sound.
+panel.setInstrument(99);
+check('something is showing', visibleGroups().length, 1);
+check('and it is the fallback', visibleGroups()[0], INSTRUMENTS[0].group);
+panel.setInstrument(2);
+check('a repeat call is a no-op', (() => {
+  const before = visibleGroups().join(',');
+  panel.setInstrument(2);
+  return visibleGroups().join(',') === before;
+})(), 'true');
+
+log('\n-- layout --');
+// Switching instrument must not reflow anything outside the panel, which is why the
+// four groups sit together rather than at either end of the grid.
+const widths = INSTRUMENT_GROUPS.map((g) => {
+  panel.setInstrument(INSTRUMENTS.find((i) => i.group === g).id);
+  return Math.round(ui.sections.get(g).getBoundingClientRect().width);
+});
+check('each panel takes the same column width', new Set(widths).size, 1);
+log(`panel ${widths[0]}px wide`);
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'instrument-panel-check-done' : 'instrument-panel-check-failed';
+</script>
+</body>
+</html>

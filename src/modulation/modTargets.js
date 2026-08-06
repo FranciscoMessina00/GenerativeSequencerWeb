@@ -10,9 +10,10 @@
  *
  * What is missing from this list is missing on purpose:
  *
- *   - Enumerated and toggle params (scale, stepDivision, stepMod, logicOp, and every
- *     *Loop*) snap to the nearest member or coerce to a boolean, so a smooth offset
- *     becomes a jump between unrelated settings rather than a sweep.
+ *   - Enumerated and toggle params (scale, stepDivision, stepMod, logicOp, instrument
+ *     and every *Loop*) snap to the nearest member or coerce to a boolean, so a smooth
+ *     offset becomes a jump between unrelated settings rather than a sweep. For
+ *     `instrument` that jump would swap the whole voice mid-phrase.
  *   - steps / pulses / rotation rebuild the Euclidean pattern and repaint the ring on
  *     every write, and change the cycle length under the playhead.
  *   - trigLoopLength / trigPerm / noteLoopLength / notePerm / velLoopLength re-capture
@@ -39,6 +40,24 @@ export const MOD_TARGETS = [
   'velBias', // 10  | read per step inside Track.step()
   'velSpread', // 11  |
   'probability', // 12 /
+
+  // The percussion voices. Latched per hit, like the string's four -- a hit already
+  // sounding is unaffected, so the LFO shapes the next one rather than bending this
+  // one. Only the instrument a track actually plays has its panel on screen, so
+  // assign mode can only ever point the LFO at a parameter that does something.
+  'kickDecay', // 13
+  'kickSweep', // 14
+  'kickSweepTime', // 15
+  'kickNoise', // 16
+  'kickNoiseColor', // 17
+  'snareDecay', // 18
+  'snareNoise', // 19
+  'snareNoiseColor', // 20
+  'snareTone', // 21
+  'snareBodyDecay', // 22
+  'hatDecay', // 23
+  'hatNoise', // 24
+  'hatNoiseColor', // 25
 ];
 
 /** The param key the LFO is pointed at, or null when unmapped. */

@@ -40,10 +40,13 @@ export class AudioEngine {
     const Ctor = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
     this.context = new Ctor({ latencyHint: 'interactive' });
 
-    // Per context, not per node: every TrackVoice instantiates the same two
-    // processors, so registering them once here is all four of them need.
+    // Per context, not per node: registering here once is all any TrackVoice needs,
+    // whichever instrument it happens to be playing. Every processor is loaded whether
+    // or not a track currently uses it, so switching instrument is a node construction
+    // rather than a module fetch. Paths are page-relative, not module-relative.
     await Promise.all([
       this.context.audioWorklet.addModule('./src/audio/worklets/modal-processor.js'),
+      this.context.audioWorklet.addModule('./src/audio/worklets/percussion-processors.js'),
       this.context.audioWorklet.addModule('./src/audio/worklets/granulator-processor.js'),
       this.context.audioWorklet.addModule('./src/audio/worklets/master-clip-processor.js'),
     ]);

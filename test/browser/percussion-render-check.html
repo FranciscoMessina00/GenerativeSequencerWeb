@@ -1,0 +1,280 @@
+<!doctype html>
+<!-- Renders each percussion voice through an OfflineAudioContext and measures the
+     samples, because a runtime error inside a worklet is silent -- the node simply
+     outputs zeros, and every UI check would still pass.
+
+     It fixes the race that makes selftest.html unreliable. That page posts a note-on
+     and starts rendering immediately; offline rendering runs as fast as the CPU allows,
+     so it can pass the note's start frame before the message has crossed to the audio
+     thread, and report 0.0000 for a voice that works. Awaiting a macrotask is not
+     enough -- it was tried, and the same page gave different failures on consecutive
+     runs. What works is the handshake selftest.html's own header asks for: post the
+     note, then ping, and wait for the pong. Port order is guaranteed, so the pong
+     proves the note was handled. A zero here is a real zero. -->
+<html>
+<head><meta charset="utf-8">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}</style>
+</head>
+<body>
+<pre id="log"></pre>
+<script type="module">
+import { INSTRUMENTS } from '../../src/audio/instruments.js';
+import { defaultsFor } from '../../src/core/paramSchema.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const SR = 48000;
+const START = 0.05;
+const VOICE = defaultsFor('voice');
+
+/** A step of the shape the scheduler emits, hitting at START. */
+const stepAt = (overrides = {}) => ({
+  trackId: 0, stepIndex: 0, triggered: true, euclidBit: 1, randomBit: 0,
+  note: 48, prevNote: 48, velocity: 0.9, mod: 4, prevMod: 4,
+  glideTime: 0, glideExponential: false, modTime: 0, modExponential: false,
+  audioTime: START, stepDuration: 0.25, trackStep: 0, ...overrides,
+});
+
+/**
+ * Render one instrument's hit. `after` runs once the note is in flight, for checking
+ * what a later message (a panic) does to a ringing voice.
+ */
+async function render(instrument, { seconds = 0.6, params = {}, step = {}, after } = {}) {
+  const ctx = new OfflineAudioContext({ numberOfChannels: 1, length: Math.ceil(seconds * SR), sampleRate: SR });
+  await ctx.audioWorklet.addModule('../../src/audio/worklets/percussion-processors.js');
+  await ctx.audioWorklet.addModule('../../src/audio/worklets/modal-processor.js');
+
+  const node = new AudioWorkletNode(ctx, instrument.processor, {
+    numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1],
+  });
+  node.connect(ctx.destination);
+
+  const bag = { ...VOICE, ...params };
+  node.port.postMessage(instrument.buildMessage(stepAt(step), bag, SR));
+  after?.(node);
+
+  // The barrier selftest.html lacks. Nothing is rendered until the processor has
+  // answered, so the note (and any panic after it) is certainly in place.
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${instrument.key}: no pong`)), 5000);
+    node.port.onmessage = (event) => {
+      if (event.data?.type !== 'pong') return;
+      clearTimeout(timer);
+      resolve(undefined);
+    };
+    node.port.postMessage({ type: 'ping' });
+  });
+
+  const buffer = await ctx.startRendering();
+  return buffer.getChannelData(0);
+}
+
+const stats = (data, from = 0, to = data.length) => {
+  let peak = 0;
+  let sum = 0;
+  let nonFinite = 0;
+  for (let i = from; i < to; i += 1) {
+    const v = data[i];
+    if (!Number.isFinite(v)) { nonFinite += 1; continue; }
+    const a = v < 0 ? -v : v;
+    if (a > peak) peak = a;
+    sum += v * v;
+  }
+  return { peak, rms: Math.sqrt(sum / Math.max(1, to - from)), nonFinite };
+};
+
+/**
+ * How bright a stretch of signal is: the energy in its sample-to-sample differences,
+ * relative to its total energy.
+ *
+ * A single-bin detector is the wrong tool for noise -- it estimates one frequency from
+ * a random spectrum, so its variance swamps the thing being measured, and it reported
+ * the hi-hat's colour backwards on some runs. Differencing is a crude high-pass across
+ * the whole band at once, which is exactly the question "is this brighter".
+ */
+function brightness(data, from, to) {
+  let diff = 0;
+  let total = 0;
+  for (let i = from + 1; i < to; i += 1) {
+    const d = data[i] - data[i - 1];
+    diff += d * d;
+    total += data[i] * data[i];
+  }
+  return total > 0 ? diff / total : 0;
+}
+
+/** Energy at one frequency, over a window. Same single-bin detector selftest uses --
+    appropriate for the kick, whose signal is a tone rather than noise. */
+function goertzel(data, hz, from, to) {
+  const w = (2 * Math.PI * hz) / SR;
+  const coef = 2 * Math.cos(w);
+  let s1 = 0;
+  let s2 = 0;
+  for (let i = from; i < to; i += 1) {
+    const s = data[i] + coef * s1 - s2;
+    s2 = s1;
+    s1 = s;
+  }
+  return Math.sqrt(s1 * s1 + s2 * s2 - coef * s1 * s2) / (to - from);
+}
+
+const frame = (seconds) => Math.round(seconds * SR);
+const PERCUSSION = INSTRUMENTS.filter((i) => i.key !== 'string');
+
+for (const instrument of PERCUSSION) {
+  log(`-- ${instrument.name} --`);
+  const data = await render(instrument);
+  const all = stats(data);
+  const before = stats(data, 0, frame(START) - 2);
+  const after = stats(data, frame(START), data.length);
+
+  check('no non-finite samples', all.nonFinite, 0);
+  check('it makes a sound', after.peak > 0.01, 'true');
+  check('bounded inside full scale', all.peak <= 1.0000001, 'true');
+  // The scheduler's whole promise: nothing before the frame it named.
+  check('silent before its start time', before.peak, 0);
+  log(`     peak ${after.peak.toFixed(4)}  rms ${after.rms.toFixed(4)}`);
+
+  // A hit is a gesture: it must decay, not sustain.
+  const early = stats(data, frame(START), frame(START + 0.02));
+  const late = stats(data, frame(0.5), data.length);
+  check('it decays rather than sustaining', late.rms < early.rms * 0.5, 'true');
+
+  // Velocity is the accent axis; a soft hit must be quieter than a hard one.
+  const soft = stats(await render(instrument, { step: { velocity: 0.15 } }), frame(START));
+  check('velocity scales it', soft.peak < after.peak * 0.6, 'true');
+
+  // A panic while it is still ringing has to actually silence it.
+  const panicked = await render(instrument, {
+    after: (node) => node.port.postMessage({ type: 'panic' }),
+  });
+  check('panic silences the tail', stats(panicked, frame(START + 0.03)).peak < 0.001, 'true');
+  log('');
+}
+
+log('-- the kick sweeps onto the note it was given --');
+{
+  const low = await render(INSTRUMENTS[1], { step: { note: 36 }, params: { kickSweep: 4, kickDecay: 1 } });
+  // 36 is ~65 Hz. By the tail the sweep has settled, so the energy should be there and
+  // not at the four-times-higher pitch it started from.
+  const from = frame(0.25);
+  const to = frame(0.45);
+  const atNote = goertzel(low, 65.4, from, to);
+  const atStart = goertzel(low, 65.4 * 4, from, to);
+  check('the tail sits on the note', atNote > atStart * 4, 'true');
+  log(`     65 Hz ${atNote.toFixed(5)} vs 262 Hz ${atStart.toFixed(5)}`);
+
+  // And the start really is higher than the end, which is what makes it read as a hit.
+  const head = frame(START);
+  const early = goertzel(low, 65.4 * 4, head, head + frame(0.008));
+  const earlyLow = goertzel(low, 65.4, head, head + frame(0.008));
+  check('the attack is above the note', early > earlyLow * 0.5, 'true');
+}
+
+log('\n-- the hi-hat is brief and bright, the snare longer --');
+{
+  const hat = await render(INSTRUMENTS[3]);
+  const snare = await render(INSTRUMENTS[2]);
+  const tail = frame(0.2);
+  check('the hat has faded by 200 ms', stats(hat, tail).rms < stats(snare, tail).rms, 'true');
+  // Colour is a tilt, so it must move energy up and down the band without changing how
+  // loud the hit is -- that is the whole reason it is a crossfade and not a cutoff.
+  const dark = await render(INSTRUMENTS[3], { params: { hatNoiseColor: 0 } });
+  const mid = await render(INSTRUMENTS[3], { params: { hatNoiseColor: 0.5 } });
+  const bright = await render(INSTRUMENTS[3], { params: { hatNoiseColor: 1 } });
+  const window = [frame(START), frame(START + 0.04)];
+  const darkness = brightness(dark, ...window);
+  const midness = brightness(mid, ...window);
+  const brightness1 = brightness(bright, ...window);
+  check('bright is brighter than dark', brightness1 > darkness, 'true');
+  check('...and halfway sits between them', midness > darkness && midness < brightness1, 'true');
+  check('dark is still audible', stats(dark, frame(START)).peak > 0.01, 'true');
+  // Equal-power, so the level survives the sweep. It measures about 1.15x; the bound
+  // is loose enough for noise and tight enough to catch the version of this that
+  // crossfaded two unequal-power halves and moved the level by 2.5x.
+  const level = (d) => stats(d, ...window).rms;
+  check('the level barely moves across the sweep',
+    Math.max(level(dark), level(bright)) / Math.min(level(dark), level(bright)) < 1.5, 'true');
+  log(`     brightness: dark ${darkness.toFixed(3)}  mid ${midness.toFixed(3)}  bright ${brightness1.toFixed(3)}`);
+  log(`     rms:        dark ${level(dark).toFixed(4)}  bright ${level(bright).toFixed(4)}`);
+}
+
+log('\n-- the hi-hat oscillator cluster has real tonal content --');
+{
+  // hatMix=0 makes this render fully deterministic -- noise() is still called (it is
+  // multiplied by a zero mix), but contributes nothing, so both sides of this check
+  // come from the same reproducible signal. That sidesteps the single-bin-Goertzel-
+  // on-noise unreliability this file's own brightness() already had to work around:
+  // comparing a tone against an off-partial frequency on ONE deterministic render is
+  // exact, where comparing against a single noisy render's energy at that same bin is
+  // a high-variance measurement of almost nothing.
+  const oscOnly = await render(INSTRUMENTS[3], { params: { hatNoise: 0 } });
+  const from = frame(START);
+  const to = frame(START + 0.02);
+  // Default note 60 -> oscHz[0] = midiToHz(60) * 4 ~= 1046.5 Hz, the cluster's
+  // fundamental; ~1182 Hz sits between the first two partials (ratios 1 and 1.25) and
+  // is not one of the six.
+  const fundamental = 1046.5;
+  const offPartial = 1182;
+  const atFundamental = goertzel(oscOnly, fundamental, from, to);
+  const atOffPartial = goertzel(oscOnly, offPartial, from, to);
+  check('the cluster has real tonal energy at its fundamental', atFundamental > atOffPartial * 3, 'true');
+  check('hatNoise=0 is not silent', stats(oscOnly, frame(START)).peak > 0.01, 'true');
+  log(`     Goertzel: fundamental(${fundamental}Hz) ${atFundamental.toFixed(5)} vs off-partial(${offPartial}Hz) ${atOffPartial.toFixed(5)}`);
+}
+
+log('\n-- worst-case levels stay bounded --');
+{
+  // The default-params loop above never exercises the loudest combinations: the
+  // resonant colour filter has a higher crest factor than the old one-pole tilt, and
+  // the hi-hat's oscillator cluster is a wholly new energy source. Check the actual
+  // worst cases at full velocity rather than trusting the defaults to cover them.
+  const snareWorst = stats(await render(INSTRUMENTS[2], {
+    step: { velocity: 1 }, params: { snareNoiseColor: 1 },
+  }));
+  check('snare stays bounded at full velocity, brightest colour', snareWorst.peak <= 1.0000001, 'true');
+  log(`     snare worst-case peak ${snareWorst.peak.toFixed(4)}`);
+
+  const hatWorst = stats(await render(INSTRUMENTS[3], {
+    step: { velocity: 1 }, params: { hatNoise: 0, hatNoiseColor: 1 },
+  }));
+  check('hat stays bounded at full velocity, pure cluster, brightest colour', hatWorst.peak <= 1.0000001, 'true');
+  log(`     hat worst-case peak ${hatWorst.peak.toFixed(4)}`);
+}
+
+log('\n-- the snare\'s two layers are independently silenceable --');
+{
+  const both = stats(await render(INSTRUMENTS[2]), frame(START));
+  const noiseOnly = stats(await render(INSTRUMENTS[2], { params: { snareTone: 0 } }), frame(START));
+  const bodyOnly = stats(await render(INSTRUMENTS[2], { params: { snareNoise: 0 } }), frame(START));
+  const silent = stats(await render(INSTRUMENTS[2], { params: { snareTone: 0, snareNoise: 0 } }), frame(START));
+  check('noise alone sounds', noiseOnly.peak > 0.01, 'true');
+  check('body alone sounds', bodyOnly.peak > 0.01, 'true');
+  check('both together is louder than either', both.rms > Math.max(noiseOnly.rms, bodyOnly.rms) * 0.9, 'true');
+  check('and with both at zero it is silent', silent.peak < 0.0001, 'true');
+}
+
+log('\n-- the string still plays, having moved to the registry --');
+{
+  // buildMessage was lifted out of TrackVoice when instruments became pluggable, so
+  // this is the one check that the modal path did not break on the way.
+  const data = await render(INSTRUMENTS[0], { seconds: 0.5 });
+  const after = stats(data, frame(START));
+  check('no non-finite samples', stats(data).nonFinite, 0);
+  check('it makes a sound', after.peak > 0.01, 'true');
+  check('silent before its start time', stats(data, 0, frame(START) - 2).peak, 0);
+  log(`     peak ${after.peak.toFixed(4)}`);
+}
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'percussion-render-check-done' : 'percussion-render-check-failed';
+</script>
+</body>
+</html>

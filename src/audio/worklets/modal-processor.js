@@ -68,6 +68,10 @@ class ModalProcessor extends AudioWorkletProcessor {
   #handleMessage(msg) {
     if (msg.type === 'noteOn') this.#noteOn(msg);
     else if (msg.type === 'panic') this.#panic();
+    // A delivery barrier for offline rendering -- see percussion-processors.js, which
+    // explains it at length. Port order is guaranteed, so a pong proves everything sent
+    // before the ping has been handled. It is what selftest.html's own header asks for.
+    else if (msg.type === 'ping') this.port.postMessage({ type: 'pong' });
   }
 
   #panic() {

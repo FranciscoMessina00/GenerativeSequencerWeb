@@ -2,6 +2,7 @@ import { EventBus } from './core/EventBus.js';
 import { Rng } from './core/rng.js';
 import { paramSpec } from './core/paramSchema.js';
 import { ParamStore, TRACK_COUNT } from './core/ParamStore.js';
+import { applyBootDefaults } from './core/bootDefaults.js';
 // Namespaced because toJSON has no button of its own -- it is how a new factory
 // patch gets authored, via the console handle at the bottom of this file.
 import * as presets from './core/presets.js';
@@ -19,6 +20,8 @@ import { FillIconControl } from './ui/FillIconControl.js';
 import { TrigLoopControl } from './ui/TrigLoopControl.js';
 import { LfoPanel } from './ui/LfoPanel.js';
 import { TrackTabs } from './ui/TrackTabs.js';
+import { InstrumentPanel } from './ui/InstrumentPanel.js';
+import { INSTRUMENT_GROUPS } from './audio/instruments.js';
 import { InfoBar } from './ui/InfoBar.js';
 import { applyPalette, paletteFor } from './ui/palette.js';
 import { Modulation } from './modulation/Modulation.js';
@@ -304,9 +307,16 @@ sliderPrepend.Modulation = lfoPanel.element;
 // Group order and membership no longer track PARAM_GROUPS: the order here is the
 // on-screen order, which the schema's own ordering has no reason to dictate.
 //
-// Transport is absent because its two params moved to the header, and Mixer because
-// its two are drawn on the tab strip -- so neither group renders as sliders here.
-const CONTROL_GROUPS = ['Pitch', 'Velocity', 'Modulation', 'String', 'Granulator'];
+// Transport is absent because its two params moved to the header, Mixer because its
+// two are drawn on the tab strip, and Instrument because the selector draws its one --
+// so none of the three renders as sliders here.
+//
+// All four instrument groups are rendered, and InstrumentPanel hides every one but the
+// visible track's. They sit together in the middle so that switching instrument moves
+// nothing else on the page.
+const CONTROL_GROUPS = [
+  'Pitch', 'Velocity', 'Modulation', ...INSTRUMENT_GROUPS, 'Granulator',
+];
 
 ui.renderGroups(
   document.getElementById('controls'),
@@ -317,6 +327,16 @@ ui.renderGroups(
     headingExtra: { Modulation: lfoPanel.targetRow },
   },
 );
+
+// Which of the four instrument panels is showing, and the selector that changes it.
+// Built after renderGroups, since it needs handles on the sections that call created.
+const instrumentPanel = new InstrumentPanel({
+  spec: paramSpec('instrument'),
+  sections: ui.sections,
+  headings: ui.headings,
+  onInput: (value) => bus.emit('param:change', { trackId: visibleTrack, key: 'instrument', value }),
+});
+
 // Attaching a hidden readout would still cost a full reformat on every step, so
 // the monitor's own visibility decides whether it gets fed.
 const monitorEl = document.getElementById('monitor');
@@ -378,6 +398,10 @@ for (const slider of Object.values(biasSpreadSliders)) registerKeyed(slider);
 registerLeaf(scaleDropdown);
 registerLeaf(logicOpControl);
 registerLeaf(probabilityControl);
+// A leaf like the scale dropdown, and registering it here is also what swaps the
+// panel: its setValue shows the matching group, so a preset load or an LFO-free
+// param:changed moves the panel without anything else being wired up.
+registerLeaf(instrumentPanel);
 
 /** Every widget that owns a trackId, so selectTrack can re-point all of them. */
 const trackBoundWidgets = [
@@ -796,11 +820,10 @@ const bootPalette = applyPalette(visibleTrack);
 view.setPalette(bootPalette);
 lfoPanel.view.setPalette(bootPalette);
 
-// Track 0 is the one you hear on a cold boot. Every track defaults to muted (see
-// paramSchema.js) precisely so this is an explicit decision made in one place,
-// rather than four identical Euclid patterns stacking up on first load. Emitted
-// after the strip exists, so its dot lights.
-store.set('mute', false, 0);
+// The defaults that differ between tracks -- see core/bootDefaults.js. Applied after
+// the strip and the panels exist, since they announce like any other committed value
+// and the controls have to be there to hear them.
+applyBootDefaults(store);
 
 // Console handle. Module bindings are not reachable from the devtools console, and
 // poking a generative instrument by hand is genuinely useful:
