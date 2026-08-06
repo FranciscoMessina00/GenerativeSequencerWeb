@@ -237,6 +237,62 @@ test('glide ramps for one step minus 30ms, scaled by amount', () => {
   assert.equal(exponential.glideExponential, true);
 });
 
+test('glide sources from the last PLAYED note, not the last step', () => {
+  // euclid(4, 2, 0) is [1, 0, 1, 0]: triggered, silent, triggered, silent. The note
+  // generator still advances on the silent step (see step()'s own comment), so its
+  // value exists but nobody ever heard it -- prevNote on step 2 must skip right
+  // past it to step 0's note, the last one actually played.
+  const track = new Track(0, new Rng(7));
+  track.setParam('steps', 4);
+  track.setParam('pulses', 2);
+  track.setParam('rotation', 0);
+  // Defaults (probability 0, logicOp OR) already make triggered === euclidBit, with
+  // nothing stochastic to control for -- set explicitly so the test does not depend
+  // on schema defaults staying what they are today.
+  track.setParam('probability', 0);
+  track.setParam('logicOp', 1);
+  track.setParam('glideAmount', 1);
+
+  const s0 = track.step(0.1);
+  const s1 = track.step(0.1);
+  const s2 = track.step(0.1);
+
+  assert.equal(s0.triggered, true);
+  assert.equal(s1.triggered, false);
+  assert.equal(s2.triggered, true);
+
+  assert.equal(s2.prevNote, s0.note, 'must glide from the last played note, not s1\'s unheard one');
+  assert.notEqual(s1.note, s0.note, 'the silent step must still have produced a note, for this to be a real test');
+});
+
+test('with nothing played yet, the first note glides from itself', () => {
+  // No previous audible note exists, so there is nothing to glide from -- the only
+  // sane fallback is the note's own pitch, which makes the ramp a no-op in pitch
+  // terms even though glideTime is nonzero.
+  const track = new Track(0, new Rng(3));
+  track.setParam('glideAmount', 1);
+  const first = track.step(0.2);
+  assert.equal(first.prevNote, first.note);
+});
+
+test('an untriggered step between two played notes still glides from the played one', () => {
+  const track = new Track(0, new Rng(11));
+  track.setParam('steps', 4);
+  track.setParam('pulses', 2);
+  track.setParam('rotation', 0);
+  track.setParam('probability', 0);
+  track.setParam('logicOp', 1);
+  track.setParam('glideAmount', 1);
+
+  const first = track.step(0.1); // triggered
+  track.step(0.1); // silent
+  const third = track.step(0.1); // triggered
+  const fourth = track.step(0.1); // silent -- lastPlayedNote must stay at third's note
+
+  assert.equal(third.prevNote, first.note);
+  assert.equal(fourth.prevNote, third.note);
+});
+
 test('the trigger loop produces a 70-step super-pattern', () => {
   // A 7-step random trigger loop against a 10-step Euclidean pattern gives a
   // 70-step pattern -- which holds when the pulse

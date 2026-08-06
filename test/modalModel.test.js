@@ -195,6 +195,55 @@ test('buildNote drops modes that would alias past Nyquist', () => {
   assert.equal(low.count, 32);
 });
 
+test('a downward glide keeps only modes safe at the pitch it starts from', () => {
+  // A low target with a much higher glideFromMidinote: kept modes are sized for the
+  // target alone (48) they would include partials the worklet would have to fold
+  // back (and so silence outright) at the glide's actual starting pitch (84).
+  const sampleRate = 48000;
+  const opts = {
+    midinote: 48, velocity: 0.8, pluckPosition: 4,
+    modes: 32, stiffness: 11, damping: 0.5, decayScale: 1, sampleRate,
+  };
+
+  const noGlide = buildNote(opts);
+  const glide = buildNote({ ...opts, glideFromMidinote: 84 });
+
+  assert.ok(glide.count <= noGlide.count, 'gliding down must never keep more modes');
+  assert.ok(glide.count < noGlide.count, `84 -> 48 is steep enough that some must go (kept ${glide.count})`);
+
+  // The real guarantee: every kept mode stays under the Nyquist margin at BOTH
+  // endpoints, not just the one buildNote was told about last.
+  const limit = sampleRate * 0.5 * 0.98;
+  const fFrom = midiToHz(84);
+  const fTo = midiToHz(48);
+  for (let i = 0; i < glide.count; i += 1) {
+    assert.ok(fFrom * glide.ratios[i] < limit, `mode ${i + 1} unsafe at the glide's start pitch`);
+    assert.ok(fTo * glide.ratios[i] < limit, `mode ${i + 1} unsafe at the glide's end pitch`);
+  }
+});
+
+test('an upward glide is already safe, so it keeps exactly what the target alone would', () => {
+  // kept is sized by the target note either way; starting from something LOWER can
+  // only ever be safer, never less so, so there is nothing extra to cull.
+  const sampleRate = 48000;
+  const opts = {
+    midinote: 84, velocity: 0.8, pluckPosition: 4,
+    modes: 32, stiffness: 11, damping: 0.5, decayScale: 1, sampleRate,
+  };
+  const noGlide = buildNote(opts);
+  const glide = buildNote({ ...opts, glideFromMidinote: 48 });
+  assert.equal(glide.count, noGlide.count);
+});
+
+test('no glideFromMidinote behaves exactly as before', () => {
+  const sampleRate = 48000;
+  const opts = {
+    midinote: 60, velocity: 0.8, pluckPosition: 4,
+    modes: 32, stiffness: 11, damping: 0.5, decayScale: 1, sampleRate,
+  };
+  assert.deepEqual(buildNote(opts), buildNote({ ...opts, glideFromMidinote: undefined }));
+});
+
 test('buildNote always keeps at least the fundamental', () => {
   // Even an absurdly high note must produce a playable voice rather than nothing.
   const n = buildNote({

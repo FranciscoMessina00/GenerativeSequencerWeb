@@ -26,6 +26,14 @@ export class Track {
     this.velocity = new ValueGenerator(VELOCITY_DISTRIBUTION, rng);
     this.mod = new ValueGenerator(MOD_DISTRIBUTION, rng);
 
+    // What glide ramps from. Not the note generator's own `previous` -- that is
+    // whatever the last STEP produced, triggered or not, and the generators advance
+    // on every step (see step()'s comment) so most of those values were never heard.
+    // Gliding from one of them would be a glide from nowhere real. `null` until the
+    // first note actually plays, at which point there is nothing to glide from yet
+    // either, so step() falls back to that note itself.
+    this.lastPlayedNote = null;
+
     // Push the defaults through the same side-effect paths a UI change uses,
     // so initial state and post-interaction state are produced identically.
     this.#rebuildPattern();
@@ -166,6 +174,14 @@ export class Track {
     // default (modInterp: 0) already produced -- an instant, un-ramped change.
     const modRamp = { time: 0, exponential: false };
 
+    // The note this step actually glides from: the last one that sounded, however
+    // many silent steps ago that was -- not last step's generator value, which is
+    // frequently a note nobody heard. this.lastPlayedNote is still last step's
+    // value at this point; it only becomes this step's below, once it can no
+    // longer be needed as "before this step."
+    const prevNote = this.lastPlayedNote ?? note.value;
+    if (trig.triggered) this.lastPlayedNote = note.value;
+
     return {
       trackId: this.trackId,
       stepIndex: trig.stepIndex,
@@ -173,7 +189,7 @@ export class Track {
       euclidBit: trig.euclidBit,
       randomBit: trig.randomBit,
       note: note.value,
-      prevNote: note.previous,
+      prevNote,
       velocity: velocity.value,
       mod: mod.value,
       prevMod: mod.previous,

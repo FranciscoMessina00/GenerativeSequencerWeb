@@ -91,9 +91,21 @@ export function modeDecays(count, velocity, damping, decayScale, out = new Float
  * Everything the worklet needs to start one note. Modes above Nyquist are dropped:
  * a two-pole filter tuned past it folds back into the audible band, so an aliased
  * resonator is not merely inaudible but actively wrong.
+ *
+ * `glideFromMidinote` is the note a glide starts from, when there is one. The cull
+ * has to be safe for every pitch the fundamental will actually pass through, not just
+ * where it lands: a downward glide sounds its modes at `glideFromMidinote`'s pitch
+ * first, and a mode kept only because the *target* note is low enough would have its
+ * coefficients folded back (by the worklet's own `w >= MAX_OMEGA` guard) at that
+ * higher starting pitch -- which zeroes its ring state outright, not just its
+ * amplitude, so it never recovers once the glide brings it back into range. Sizing
+ * the cull by whichever endpoint is higher keeps every kept mode valid for the whole
+ * glide, since both interpolation curves move the fundamental monotonically between
+ * the two endpoints with no overshoot.
  */
 export function buildNote({
   midinote,
+  glideFromMidinote,
   velocity,
   pluckPosition,
   modes,
@@ -108,6 +120,7 @@ export function buildNote({
   const decays = modeDecays(count, velocity, damping, decayScale);
 
   const f0 = midiToHz(midinote);
+  const f0Safety = glideFromMidinote == null ? f0 : Math.max(f0, midiToHz(glideFromMidinote));
   const nyquist = sampleRate * 0.5;
   // Leave a little margin below Nyquist; resonators very close to it are
   // numerically poorly behaved.
@@ -115,7 +128,7 @@ export function buildNote({
 
   let kept = 0;
   for (let i = 0; i < count; i += 1) {
-    if (f0 * ratios[i] < limit) kept += 1;
+    if (f0Safety * ratios[i] < limit) kept += 1;
     else break; // ratios ascend, so the first failure ends the useful range
   }
   kept = Math.max(1, kept);

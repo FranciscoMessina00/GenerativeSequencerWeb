@@ -40,6 +40,11 @@ function makeVoice() {
     glideTotal: 0,
     glideDone: 0,
     glideExp: false,
+    // True once the ramp has been snapped to its exact target -- see #renderVoice.
+    // Without it a short glide can end up frozen a chunk short of f0To forever,
+    // because the last update before glideDone crosses glideTotal is computed at
+    // whatever glideDone was at the START of that chunk, never at exactly 1.
+    glideSettled: false,
 
     mFrom: 4,
     mTo: 4,
@@ -130,6 +135,7 @@ class ModalProcessor extends AudioWorkletProcessor {
     v.f0To = msg.f0To;
     v.glideTotal = Math.round(msg.glideTime * sampleRate);
     v.glideDone = 0;
+    v.glideSettled = false;
     v.glideExp = Boolean(msg.glideExponential);
 
     v.mFrom = msg.mFrom;
@@ -233,9 +239,21 @@ class ModalProcessor extends AudioWorkletProcessor {
     const end = offset + length;
 
     while (i < end) {
-      const chunk = Math.min(SUB_BLOCK, end - i);
+      // While gliding, a chunk must never run past the ramp's own end: a normal
+      // SUB_BLOCK-sized chunk started before the ramp finishes but covering
+      // samples past it would render that whole chunk at the coefficients from
+      // its *start*, and if that same chunk also carries glideDone past
+      // glideTotal, the loop's `glideDone < glideTotal` guard goes false and
+      // #advanceGlide is never called again -- freezing the pitch wherever that
+      // stale chunk-start value left it, not at the target. The shorter the
+      // glide relative to SUB_BLOCK, the worse this undershoots: a glide a few
+      // samples long can end up frozen 30%+ of the way short of its note,
+      // clearly out of tune, which is exactly backwards from what a short glide
+      // should sound like.
+      const gliding = v.glideTotal > 0 && v.glideDone < v.glideTotal;
+      const chunk = Math.min(SUB_BLOCK, end - i, gliding ? Math.max(1, v.glideTotal - v.glideDone) : Infinity);
 
-      if (v.glideTotal > 0 && v.glideDone < v.glideTotal) {
+      if (gliding) {
         this.#advanceGlide(v);
       }
       if (v.modTotal > 0 && v.modDone < v.modTotal) {
@@ -275,6 +293,14 @@ class ModalProcessor extends AudioWorkletProcessor {
       v.glideDone += chunk;
       v.modDone += chunk;
       v.lifeRemaining -= chunk;
+
+      // The chunk capping above guarantees this fires with glideDone exactly at
+      // glideTotal, so the snap lands on the true target rather than one more
+      // chunk-quantised approximation of it -- see the comment above.
+      if (v.glideTotal > 0 && v.glideDone >= v.glideTotal && !v.glideSettled) {
+        this.#updateCoefficients(v, v.f0To);
+        v.glideSettled = true;
+      }
     }
 
     v.peak = peak;

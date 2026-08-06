@@ -90,6 +90,10 @@ export function instrumentById(id) {
 function buildStringMessage(step, p, sampleRate) {
   const note = buildNote({
     midinote: step.note,
+    // Only when actually gliding -- see buildNote's header. Otherwise prevNote is
+    // just whatever the generator produced last step, triggered or not, and has no
+    // bearing on this note's own Nyquist safety.
+    glideFromMidinote: step.glideTime > 0 ? step.prevNote : undefined,
     velocity: step.velocity,
     pluckPosition: step.mod,
     modes: p.modes,
