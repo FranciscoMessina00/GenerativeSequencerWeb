@@ -27,15 +27,14 @@ permissions:
   pages: write
   id-token: write
 
-# Only one deployment at a time, and never cancel one that is already live-publishing
-# midway through -- matches GitHub's own recommended Pages workflow template.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,6 +52,7 @@ jobs:
   build:
     needs: verify
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
 
@@ -74,6 +74,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
