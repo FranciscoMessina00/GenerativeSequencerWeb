@@ -133,6 +133,11 @@ export class Scheduler {
     });
   }
 
+  /**
+   * Intentionally unreached today: the app builds one Scheduler for the tab's
+   * whole lifetime, and the browser tears down the Ticker's Worker on unload
+   * regardless. Kept for a future embedding scenario, not dead by oversight.
+   */
   dispose() {
     this.ticker.dispose();
   }

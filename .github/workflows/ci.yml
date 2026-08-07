@@ -1,0 +1,25 @@
+# Runs the same checks deploy.yml gates a release on, but on every push and every
+# pull request -- so a mistake shows up the moment it's pushed, not the next time
+# someone cuts a release. Verify-only: nothing here ever builds or publishes the
+# site, whatever branch or PR triggered it.
+name: CI
+
+on:
+  push:
+  pull_request:
+  # For a manual re-run from the Actions tab, same as deploy.yml offers.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed on the ref, not a fixed target like deploy.yml's `pages` group: a second
+  # push to the same branch or PR should cancel the run already in flight for it,
+  # rather than queuing behind it or running both to completion.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml

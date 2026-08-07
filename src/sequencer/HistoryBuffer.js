@@ -1,14 +1,21 @@
 import { permute, permutationIndex } from './permute.js';
 
 /**
- * The shift register every generator is built on: a 32-slot array rotated left by
- * one each step, with a fresh value written at a fixed index and then *read one
- * slot behind the write head*. That off-by-one is deliberate -- a step consumes
- * the value generated on the step before, and that latency is part of the feel.
+ * The shift register every generator is built on: 32 slots of history, with a
+ * fresh value written at a fixed index and then *read one slot behind the write
+ * head*. That off-by-one is deliberate -- a step consumes the value generated on
+ * the step before, and that latency is part of the feel.
  *
- * Rotating physically means the layout encodes chronology: writeIndex holds the
- * newest value, writeIndex-1 the one before, wrapping down through 0. Loop capture
- * slices off the front, so it deliberately grabs *older* history.
+ * Storage is a static `ring` array plus one counter `t` that advances each step,
+ * rather than physically rotating the array itself (an earlier version did, at
+ * O(size) per step -- cheap at this size and step rate, but every other hot path in
+ * this instrument is O(1), so it was worth removing). `t` is what "writeIndex holds
+ * the newest value, writeIndex-1 the one before, wrapping down through 0" now means:
+ * logical index `j`'s value always lives at ring slot `(j + t) mod size`. That single
+ * identity replaces the old rotate-then-overwrite pair -- see #physical() -- and it
+ * is exactly the same layout the rotating version produced, just computed instead of
+ * moved. Loop capture slices off the front (logical indices `0..length-1`), so it
+ * deliberately grabs *older* history, same as before.
  */
 export class HistoryBuffer {
   /**
@@ -20,9 +27,13 @@ export class HistoryBuffer {
   constructor({ size = 32, writeIndex, fill }) {
     this.size = size;
     this.writeIndex = writeIndex;
-    this.data = Array.from({ length: size }, fill);
+    this.ring = Array.from({ length: size }, fill);
+    // Steps advanced so far, mod size -- see #physical(). Starts at 0, which is what
+    // makes the fresh `ring` read as logical index === physical index, i.e. identical
+    // to the old pre-rotation array.
+    this.t = 0;
 
-    this.loop = this.data.slice(0, 1);
+    this.loop = this.ring.slice(0, 1);
     this.loopLength = 1;
     this.loopReadIndex = 0;
     // Total steps the loop has ever advanced -- absolute, never reset and
@@ -30,24 +41,34 @@ export class HistoryBuffer {
     this.loopStepCount = 0;
   }
 
-  /** Rotate left by one, then write `value` at the write head. */
+  /**
+   * The ring slot currently holding logical index `j` -- the value `advance()` would
+   * have left at `data[j]` after however many calls have happened, back when this was
+   * a physically-rotating array. Triple-mod'd so a negative `j` (never produced by
+   * this file's own two writeIndex values, both >= 2, but cheap to guard) still lands
+   * in range rather than returning `undefined`.
+   */
+  #physical(j) {
+    return (((j % this.size) + this.t) % this.size + this.size) % this.size;
+  }
+
+  /** Advance the register by one step, writing `value` at the write head. */
   advance(value) {
-    const first = this.data[0];
-    for (let i = 0; i < this.size - 1; i += 1) {
-      this.data[i] = this.data[i + 1];
-    }
-    this.data[this.size - 1] = first;
-    this.data[this.writeIndex] = value;
+    // Incrementing before writing is what makes the write land where a rotate would
+    // have moved writeIndex's *new* slot to -- reversing the order writes to
+    // yesterday's slot instead and desyncs from the very first call.
+    this.t = (this.t + 1) % this.size;
+    this.ring[this.#physical(this.writeIndex)] = value;
   }
 
   /** The value this step should consume: one slot behind the write head. */
   get current() {
-    return this.data[this.writeIndex - 1];
+    return this.ring[this.#physical(this.writeIndex - 1)];
   }
 
   /** The value consumed on the previous step -- the glide origin. */
   get previous() {
-    return this.data[this.writeIndex - 2];
+    return this.ring[this.#physical(this.writeIndex - 2)];
   }
 
   /**
@@ -60,10 +81,11 @@ export class HistoryBuffer {
    */
   captureLoop(length, permNormalized = 0) {
     this.loopLength = Math.max(1, Math.min(this.size, Math.floor(length)));
-    this.loop = permute(
-      this.data.slice(0, this.loopLength),
-      permutationIndex(permNormalized, this.loopLength),
+    const window = Array.from(
+      { length: this.loopLength },
+      (_, p) => this.ring[this.#physical(p)],
     );
+    this.loop = permute(window, permutationIndex(permNormalized, this.loopLength));
     // Clamped, so length 1 lands on 0 and yields a one-value repeat.
     this.loopReadIndex = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 2));
   }

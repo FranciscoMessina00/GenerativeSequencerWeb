@@ -32,22 +32,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The same bar a push or a PR already has to clear -- see verify.yml, which is
+  # what actually defines "passing" for this repo, and ci.yml, which runs it more
+  # often. Calling it here rather than keeping a second copy is what stops the two
+  # from quietly drifting apart.
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-
-      - name: Run tests
-        run: npm test
-
-      - name: Type-check
-        run: |
-          npm install --no-save typescript@5
-          npm run typecheck
+    uses: ./.github/workflows/verify.yml
 
   build:
     needs: verify

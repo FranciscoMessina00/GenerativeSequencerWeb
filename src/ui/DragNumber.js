@@ -13,17 +13,8 @@
  * necessary because it is small and sits inside a circle.
  */
 
+import { bindDragAxis, dragDeltaValue, FULL_RANGE_PX } from './dragGesture.js';
 import { quantize } from './numberUtils.js';
-
-/**
- * Travel, in pixels, for one full sweep of the parameter's range.
- *
- * Exported because FillIconControl drags the same way. Two drag controls on one panel
- * that answered differently to the same hand movement would feel like a bug, so they
- * share the constant rather than each declaring 180.
- */
-export const FULL_RANGE_PX = 180;
-export const FINE_DIVISOR = 8;
 
 export class DragNumber {
   /**
@@ -127,69 +118,29 @@ export class DragNumber {
   }
 
   #bind() {
-    const el = this.element;
-
-    el.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      el.setPointerCapture(e.pointerId);
-      el.classList.add('is-dragging');
-      this.dragStartY = e.clientY;
-      this.dragStartValue = this.value;
-      if (this.values) this.dragStartIndex = this.#indexOfValue();
-    });
-
-    el.addEventListener('pointermove', (e) => {
-      if (this.dragStartY === undefined) return;
-      // Up is positive: dragging toward the top of the screen raises the value.
-      const dy = this.dragStartY - e.clientY;
-
-      if (this.values) {
-        // One full sweep walks the whole list, however many members it has, so the
-        // travel per setting stays comfortable whether there are three or thirty.
-        const perPx = (this.values.length - 1) / FULL_RANGE_PX;
-        const index = Math.round(this.dragStartIndex + dy * perPx);
-        this.#commit(this.values[Math.min(this.values.length - 1, Math.max(0, index))]);
-        return;
-      }
-
-      const range = this.spec.max - this.spec.min;
-      let perPx = range / FULL_RANGE_PX;
-      if (e.shiftKey) perPx /= FINE_DIVISOR;
-      this.#commit(this.dragStartValue + dy * perPx);
-    });
-
-    const end = (e) => {
-      if (this.dragStartY === undefined) return;
-      this.dragStartY = undefined;
-      el.classList.remove('is-dragging');
-      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
-    };
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
-
-    el.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      this.#nudge(e.deltaY < 0 ? 1 : -1);
-    }, { passive: false });
-
-    el.addEventListener('dblclick', () => this.#commit(this.spec.def));
-
-    el.addEventListener('keydown', (e) => {
-      const map = {
-        ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1,
-        PageUp: 10, PageDown: -10,
-      };
-      if (e.key in map) {
-        e.preventDefault();
-        this.#nudge(map[e.key]);
-      } else if (e.key === 'Home') {
-        e.preventDefault();
-        this.#commit(this.values ? this.values[0] : this.spec.min);
-      } else if (e.key === 'End') {
-        e.preventDefault();
-        this.#commit(this.values ? this.values[this.values.length - 1] : this.spec.max);
-      }
+    bindDragAxis({
+      element: this.element,
+      onDragStart: () => {
+        this.dragStartValue = this.value;
+        if (this.values) this.dragStartIndex = this.#indexOfValue();
+      },
+      onDragMove: (dy, shiftKey) => {
+        if (this.values) {
+          // One full sweep walks the whole list, however many members it has, so the
+          // travel per setting stays comfortable whether there are three or thirty.
+          // No shift-fine here -- an index has no "finer" to walk toward.
+          const perPx = (this.values.length - 1) / FULL_RANGE_PX;
+          const index = Math.round(this.dragStartIndex + dy * perPx);
+          this.#commit(this.values[Math.min(this.values.length - 1, Math.max(0, index))]);
+          return;
+        }
+        this.#commit(dragDeltaValue(this.dragStartValue, dy, this.spec.max - this.spec.min, shiftKey));
+      },
+      onWheelNudge: (direction) => this.#nudge(direction),
+      onDblClick: () => this.#commit(this.spec.def),
+      onKeyNudge: (steps) => this.#nudge(steps),
+      onHome: () => this.#commit(this.values ? this.values[0] : this.spec.min),
+      onEnd: () => this.#commit(this.values ? this.values[this.values.length - 1] : this.spec.max),
     });
   }
 }
