@@ -624,21 +624,29 @@ test('getTrigLoopWindow advances by exactly one step per step() call', () => {
   assert.deepEqual(after.slice(0, 4), before.slice(1));
 });
 
-test('getTrigLoopWindow(count, fromRingPosition) rotates the projection onto ring positions', () => {
-  // The ring overlay is indexed by Euclidean ring position, not by loop-phase
-  // order -- a snapshot taken mid-cycle (activating the loop, changing its
-  // length, switching tracks) has to land result[k] on ring position
-  // (fromRingPosition + k), or every sector but the one at position 0 shows
-  // the wrong value until the next revolution happens to correct it.
+test('getTrigLoopProjection matches what actually plays next, position for position', () => {
+  // Ground-truth check, not a hand-derived formula: project from wherever
+  // the cursor currently sits, then step the trigger around one full lap
+  // and confirm the projection predicted the randomBit that actually played
+  // at each ring position. Covers both things a mid-cycle snapshot needs --
+  // landing on the right ring position, and the one-step lag every
+  // generator's advance-before-read introduces (see HistoryBuffer) -- since
+  // getting either wrong desyncs this from the second step onward.
   const track = new Track(0, new Rng(7));
-  track.setParam('trigLoop', true);
+  track.setParam('steps', 6);
+  for (let i = 0; i < 4; i += 1) track.step(0.125); // land mid-cycle before activating
   track.setParam('trigLoopLength', 5);
+  track.setParam('trigLoop', true);
 
-  const raw = track.getTrigLoopWindow(6);
-  for (const fromRingPosition of [0, 1, 3, 5]) {
-    const rotated = track.getTrigLoopWindow(6, fromRingPosition);
-    for (let k = 0; k < 6; k += 1) {
-      assert.equal(rotated[(fromRingPosition + k) % 6], raw[k], `fromRingPosition=${fromRingPosition}, k=${k}`);
-    }
+  const fromRingPosition = track.stepIndex;
+  const projection = track.getTrigLoopProjection(6, fromRingPosition);
+
+  for (let k = 0; k < 6; k += 1) {
+    const ringPosition = (fromRingPosition + k) % 6;
+    // The trigger alone, not track.step(): the projection only covers the
+    // rhythm loop, and this keeps note/velocity/mod out of it.
+    const { stepIndex, randomBit } = track.trigger.step({ probability: 0.5, logicOp: 1 });
+    assert.equal(stepIndex, ringPosition);
+    assert.equal(randomBit, projection[ringPosition]);
   }
 });

@@ -14,8 +14,8 @@ import { permute, permutationIndex } from './permute.js';
  * logical index `j`'s value always lives at ring slot `(j + t) mod size`. That single
  * identity replaces the old rotate-then-overwrite pair -- see #physical() -- and it
  * is exactly the same layout the rotating version produced, just computed instead of
- * moved. Loop capture slices off the front (logical indices `0..length-1`), so it
- * deliberately grabs *older* history, same as before.
+ * moved. Loop capture always ends its window at `current` -- see captureLoop() --
+ * so it grabs the most recent `length` values actually consumed, oldest first.
  */
 export class HistoryBuffer {
   /**
@@ -83,18 +83,48 @@ export class HistoryBuffer {
    * permutation, or the toggle. Re-capturing rather than freezing once is what
    * keeps loop mode alive: the loop is always built from recent material.
    *
+   * The window ends at `current` (logical `writeIndex - 1`) and reaches
+   * `length - 1` steps further back from there -- so the newest captured
+   * value is always whatever was actually just consumed, never the value
+   * already sitting at `writeIndex` waiting for the next advance() to
+   * promote it to `current`. Getting this wrong is subtle: for `length` up
+   * to `writeIndex` it happens to look right anyway (a contiguous, all-past
+   * block, just anchored at logical index 0 instead of at `current`), so it
+   * only shows up once `length` exceeds `writeIndex` -- 16 is exactly where
+   * it first bites the trigger register (`writeIndex` 15), which is also
+   * the single most natural loop length to reach for.
+   *
+   * Capped at `size - 1`, not `size`: one slot is always that not-yet-
+   * consumed value, so a `size`-slot register only ever holds `size - 1`
+   * values that have actually been current at some point. Asking for all
+   * `size` would have nowhere left to read the last one from except that
+   * same not-yet-consumed slot -- the exact thing this function exists to
+   * avoid.
+   *
    * `permNormalized` is a 0..1 knob position -- see permutationIndex().
    * `loopStepCount` is deliberately left untouched; see advanceLoop().
    */
   captureLoop(length, permNormalized = 0) {
-    this.loopLength = Math.max(1, Math.min(this.size, Math.floor(length)));
+    this.loopLength = Math.max(1, Math.min(this.size - 1, Math.floor(length)));
+    const start = this.writeIndex - this.loopLength;
     const window = Array.from(
       { length: this.loopLength },
-      (_, p) => this.ring[this.#physical(p)],
+      (_, p) => this.ring[this.#physical(start + p)],
     );
     this.loop = permute(window, permutationIndex(permNormalized, this.loopLength));
-    // Clamped, so length 1 lands on 0 and yields a one-value repeat.
-    this.loopReadIndex = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 2));
+    // `loop[loopLength - 1]` is `current` (see above), and advanceLoop()
+    // always increments loopStepCount *before* loopCurrent reads it -- same
+    // one-behind-the-write-head latency as advance()/current, just over the
+    // frozen `loop` array instead of the live ring. So the first read after
+    // activation must land one past `loopReadIndex`'s own position landing
+    // on `current`, i.e. `loopReadIndex` itself has to BE `loopLength - 1`:
+    // phase 1 then wraps straight to `loop[0]`, the oldest captured value,
+    // continuing the real chronological order (oldest ... current) instead
+    // of replaying `current` a second time before jumping back to the
+    // start. Always >= 0 -- `loopLength` itself is already clamped to >= 1
+    // above -- so no extra floor clamp is needed here (contrast loopPrevious
+    // below, which does still need one).
+    this.loopReadIndex = this.loopLength - 1;
   }
 
   /**
@@ -152,13 +182,15 @@ export class HistoryBuffer {
   }
 
   /**
-   * Glide origin while looping. The natural index here is `loopLength - 3`, which
-   * goes negative for loops shorter than 3 -- clamped, so short loops glide to
-   * themselves rather than reading off the end.
+   * Glide origin while looping -- one slot behind loopCurrent's own base,
+   * same relationship `previous` has to `current`. The natural index here is
+   * `loopReadIndex - 1` = `loopLength - 2`, which goes negative for a
+   * 1-value loop -- clamped, so a loop that short glides to itself rather
+   * than reading off the end.
    */
   get loopPrevious() {
     const phase = this.#mod(this.loopStepCount, this.loopLength);
-    const baseIndex = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 3));
+    const baseIndex = Math.max(0, this.loopLength - 2);
     return this.loop[(baseIndex + phase) % this.loopLength];
   }
 }
