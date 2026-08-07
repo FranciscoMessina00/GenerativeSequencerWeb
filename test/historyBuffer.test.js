@@ -135,6 +135,29 @@ test('captureLoop at a mid-size length tiles loopWindow circularly past its own 
   }
 });
 
+test('shiftLoopPlayhead translates the phase -- including negative -- without touching what was captured', () => {
+  const buf = new HistoryBuffer({ size: 32, writeIndex: 15, fill: makeFill() });
+  buf.captureLoop(5, 0);
+  const { loop, loopLength, loopReadIndex } = buf;
+  buf.advanceLoop();
+  buf.advanceLoop(); // loopStepCount === 2
+  const phase2Window = buf.loopWindow(5);
+
+  buf.shiftLoopPlayhead(5); // one full loopLength forward
+  assert.equal(buf.loopStepCount, 7);
+  assert.deepEqual(buf.loopWindow(5), phase2Window); // 7 mod 5 === 2, same phase
+
+  buf.shiftLoopPlayhead(-10); // two full loopLengths back, landing negative
+  assert.equal(buf.loopStepCount, -3);
+  assert.deepEqual(buf.loopWindow(5), phase2Window); // -3 mod 5 === 2, same phase again
+
+  // What was captured is untouched throughout -- a shift only ever moves
+  // the read position, never re-snapshots.
+  assert.equal(buf.loop, loop);
+  assert.equal(buf.loopLength, loopLength);
+  assert.equal(buf.loopReadIndex, loopReadIndex);
+});
+
 for (const writeIndex of [15, 31]) {
   test(`metamorphic: real HistoryBuffer matches the reference shifting algorithm over a long random run (writeIndex ${writeIndex})`, () => {
     let seed = writeIndex === 15 ? 0x1234 : 0x5678;
