@@ -52,6 +52,13 @@ export class HistoryBuffer {
     return (((j % this.size) + this.t) % this.size + this.size) % this.size;
   }
 
+  /** True mathematical modulo -- unlike `%`, never negative for a negative
+   *  `n`. Needed for loop-phase reads once `loopStepCount` can go negative;
+   *  see shiftLoopPlayhead(). */
+  #mod(n, m) {
+    return ((n % m) + m) % m;
+  }
+
   /** Advance the register by one step, writing `value` at the write head. */
   advance(value) {
     // Incrementing before writing is what makes the write land where a rotate would
@@ -102,8 +109,25 @@ export class HistoryBuffer {
     this.loopStepCount += 1;
   }
 
+  /**
+   * Translate the loop's phase by `delta` ticks -- a plain shift, not a
+   * fold, so it stays exact for every possible length exactly like leaving
+   * `loopStepCount` untouched would (see captureLoop()'s note on revisiting
+   * lengths); `delta` can be negative, and so can the `loopStepCount` this
+   * leaves behind -- loopCurrent/loopWindow/loopPrevious's modulo already
+   * handles that.
+   *
+   * Used on a transport stop: rewinding the Euclidean cursor by N ticks
+   * without shifting a loop's phase by the same N would jump its alignment
+   * to the pattern by however long playback happened to run before that
+   * particular stop -- see TriggerGenerator.resetPlayhead().
+   */
+  shiftLoopPlayhead(delta) {
+    this.loopStepCount += delta;
+  }
+
   get loopCurrent() {
-    const phase = this.loopStepCount % this.loopLength;
+    const phase = this.#mod(this.loopStepCount, this.loopLength);
     return this.loop[(this.loopReadIndex + phase) % this.loopLength];
   }
 
@@ -121,7 +145,7 @@ export class HistoryBuffer {
   loopWindow(count) {
     const out = new Array(count);
     for (let k = 0; k < count; k += 1) {
-      const phase = (this.loopStepCount + k) % this.loopLength;
+      const phase = this.#mod(this.loopStepCount + k, this.loopLength);
       out[k] = this.loop[(this.loopReadIndex + phase) % this.loopLength];
     }
     return out;
@@ -133,7 +157,7 @@ export class HistoryBuffer {
    * themselves rather than reading off the end.
    */
   get loopPrevious() {
-    const phase = this.loopStepCount % this.loopLength;
+    const phase = this.#mod(this.loopStepCount, this.loopLength);
     const baseIndex = Math.max(0, Math.min(this.loopLength - 1, this.loopLength - 3));
     return this.loop[(baseIndex + phase) % this.loopLength];
   }

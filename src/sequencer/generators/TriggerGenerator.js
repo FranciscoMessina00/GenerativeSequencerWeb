@@ -53,6 +53,20 @@ export class TriggerGenerator {
     this.recaptureLoop(length, permIndex);
   }
 
+  /**
+   * Rewind the Euclidean cursor to the start on transport stop. If looping,
+   * shift the loop's phase by the same amount the cursor is retreating
+   * (read before it's zeroed below), so the loop's alignment to the pattern
+   * carries over seamlessly instead of jumping by however long playback
+   * happened to run before this particular stop -- see
+   * HistoryBuffer.shiftLoopPlayhead(). Content is untouched either way:
+   * this only ever shifts the phase, never re-captures.
+   */
+  resetPlayhead() {
+    if (this.loopEnabled) this.history.shiftLoopPlayhead(-this.patternIndex);
+    this.patternIndex = 0;
+  }
+
   /** Current Euclidean pattern, for the step-ring display. */
   getPattern() {
     return this.pattern;

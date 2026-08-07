@@ -72,11 +72,20 @@ export class Scheduler {
     this.pump();
   }
 
-  /** Pause, keeping the playhead where it is. */
+  /**
+   * Stop, and rewind the Euclidean playhead to the start. Random/loop
+   * material is never regenerated or snapped back to its own beginning --
+   * content stays exactly as captured/accumulated, and a loop's phase
+   * merely carries over seamlessly (shifted, not reset), so its alignment
+   * to the pattern survives a stop the same way it would if playback had
+   * simply never paused. See Track.resetPlayhead().
+   */
   stop() {
     if (!this.running) return;
     this.running = false;
     this.ticker.stop();
+    for (const clock of this.trackClocks) clock.stepCount = 0;
+    for (const track of this.tracks) track.resetPlayhead();
     this.bus.emit('transport:change', { running: false });
   }
 

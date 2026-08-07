@@ -85,6 +85,25 @@ export class Track {
     }
   }
 
+  /**
+   * Rewind to the start on transport stop. Only the Euclidean cursor
+   * actually resets to 0; every loop (trigger's own included) has its phase
+   * shifted by the same amount instead, so its alignment to the pattern
+   * carries over seamlessly rather than jumping by however long playback
+   * ran before this stop -- see TriggerGenerator.resetPlayhead(). Read
+   * before the trigger's cursor gets zeroed. `lastPlayedNote` resets too, so
+   * the first note after resuming never glides in from a note that sounded
+   * before the stop.
+   */
+  resetPlayhead() {
+    const shift = -this.trigger.stepIndex;
+    this.trigger.resetPlayhead();
+    this.note.resetPlayhead(shift);
+    this.velocity.resetPlayhead(shift);
+    this.mod.resetPlayhead(shift);
+    this.lastPlayedNote = null;
+  }
+
   #rebuildPattern() {
     const { steps, pulses, rotation } = this.params;
     // Both reach 32 independently, but pulses > steps degenerates to every step
@@ -103,9 +122,33 @@ export class Track {
     return this.trigger.getPattern();
   }
 
-  /** The rhythm loop's next `count` random bits -- for the ring's buffer overlay. */
-  getTrigLoopWindow(count) {
-    return this.trigger.getLoopWindow(count);
+  /** The Euclidean cursor's current ring position -- see resetPlayhead(). */
+  get stepIndex() {
+    return this.trigger.stepIndex;
+  }
+
+  /**
+   * The rhythm loop's captured content, for the ring's buffer overlay --
+   * one value per ring position rather than per loop-phase order.
+   *
+   * `getLoopWindow(count)` itself is phase-0-first: its own result[0] is
+   * whatever the loop would read right now, result[1] one tick later, and
+   * so on -- correct to paint directly onto ring positions 0..count-1 only
+   * when the Euclidean cursor is ALSO at position 0 right now (true for
+   * main.js's one wrap-triggered caller, which reaches this exactly when
+   * the cursor has just landed back there). Every other caller reads mid-
+   * cycle, at whatever `fromRingPosition` the cursor currently sits at --
+   * pass it (`this.stepIndex`), or the overlay lines up with the wrong ring
+   * sectors until the next revolution happens to correct it on its own.
+   */
+  getTrigLoopWindow(count, fromRingPosition = 0) {
+    const window = this.trigger.getLoopWindow(count);
+    if (fromRingPosition === 0) return window;
+    const aligned = new Array(count);
+    for (let k = 0; k < count; k += 1) {
+      aligned[(fromRingPosition + k) % count - 1] = window[k];
+    }
+    return aligned;
   }
 
   /**
