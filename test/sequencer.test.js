@@ -231,23 +231,127 @@ test('an odd step count does not glitch swing -- parity comes from trackStep, no
   }
 });
 
-test('stop preserves the playhead; the generators resume where they left off', () => {
+test('stop rewinds the Euclidean cursor and swing parity to the start', () => {
   const h = harness();
-  h.bus.emit('param:change', { trackId: 0, key: 'steps', value: 8 });
   h.scheduler.start();
   h.advance(1);
-  const lastIndex = h.steps[h.steps.length - 1].stepIndex;
+  assert.notEqual(h.scheduler.trackClocks[0].stepCount, 0);
+  assert.notEqual(h.track.trigger.stepIndex, 0);
 
   h.scheduler.stop();
+  // The rewind happens synchronously on stop, not on the next start.
+  assert.equal(h.scheduler.trackClocks[0].stepCount, 0);
+  assert.equal(h.track.trigger.stepIndex, 0);
+
+  const stoppedCount = h.steps.length;
   h.advance(2); // nothing should be emitted while stopped
-  assert.equal(h.steps[h.steps.length - 1].stepIndex, lastIndex);
+  assert.equal(h.steps.length, stoppedCount);
 
   h.scheduler.start();
-  h.advance(0.2);
-  assert.equal(h.steps[h.steps.length - 1].stepIndex !== lastIndex, true);
-  // The pattern index continued rather than restarting from 0.
-  const resumed = h.steps.filter((s) => s.audioTime > h.clock.now - 0.2);
-  assert.ok(resumed.length > 0);
+  const resumed = h.steps[h.steps.length - 1];
+  assert.equal(resumed.stepIndex, 0);
+  assert.equal(resumed.trackStep, 0);
+});
+
+test('stop rewinds the pattern index and glide origin, but the random buffer keeps filling as if playback never stopped', () => {
+  // Driven at the Track level, like the loop-length regression test below --
+  // no wall-clock timing to risk misaligning the two runs being compared.
+  const stepDur = 0.05;
+  // steps === pulses makes every Euclidean step a 1, and OR (id 1) then
+  // triggers regardless of the random bit -- so lastPlayedNote is guaranteed
+  // to be set without depending on how the rng happens to roll.
+  const baseParams = { steps: 4, pulses: 4, rotation: 0, logicOp: 1, probability: 0.5 };
+
+  const reference = new Track(0, new Rng(7));
+  for (const [k, v] of Object.entries(baseParams)) reference.setParam(k, v);
+  for (let i = 0; i < 6; i += 1) reference.step(stepDur);
+  const uninterrupted = Array.from({ length: 5 }, () => reference.step(stepDur).randomBit);
+
+  const touched = new Track(0, new Rng(7));
+  for (const [k, v] of Object.entries(baseParams)) touched.setParam(k, v);
+  for (let i = 0; i < 6; i += 1) touched.step(stepDur);
+  assert.notEqual(touched.trigger.stepIndex, 0);
+  assert.notEqual(touched.lastPlayedNote, null);
+
+  touched.resetPlayhead();
+  assert.equal(touched.trigger.stepIndex, 0);
+  assert.equal(touched.lastPlayedNote, null);
+
+  // Not in loop mode: the ring keeps writing from exactly where it left off,
+  // so the two tracks -- one stopped and resumed, one never stopped -- must
+  // read back an identical continuation.
+  const resumed = Array.from({ length: 5 }, () => touched.step(stepDur).randomBit);
+  assert.deepEqual(resumed, uninterrupted);
+});
+
+test('a loop\'s alignment to the pattern carries over seamlessly through a stop, whatever moment it happens', () => {
+  // A loop's phase is biased to wherever in the Euclidean cycle it was
+  // turned on. During uninterrupted play that bias is just the invariant
+  // "loopStepCount - patternIndex stays constant" (both advance once per
+  // tick together). A stop that rewinds patternIndex to 0 has to shift
+  // loopStepCount by the same amount or that invariant breaks -- and the
+  // amount of breakage would depend on how long playback happened to run
+  // before that particular stop, i.e. the loop would visibly "rotate"
+  // depending on when you stopped. Checked across stop points that land
+  // both before and after the 4-step pattern has wrapped at least once.
+  const stepDur = 0.05;
+  const baseParams = { steps: 4, pulses: 4, rotation: 0, logicOp: 1, probability: 0.5 };
+
+  for (const stepsBeforeStop of [1, 2, 6, 9]) {
+    const track = new Track(0, new Rng(11));
+    for (const [k, v] of Object.entries(baseParams)) track.setParam(k, v);
+    for (let i = 0; i < 3; i += 1) track.step(stepDur); // patternIndex === 3 at activation
+    track.setParam('trigLoop', true);
+    track.setParam('trigLoopLength', 5);
+
+    for (let i = 0; i < stepsBeforeStop; i += 1) track.step(stepDur);
+    const alignmentBeforeStop = track.trigger.history.loopStepCount - track.trigger.stepIndex;
+
+    track.resetPlayhead();
+    assert.equal(track.trigger.stepIndex, 0, `stepsBeforeStop=${stepsBeforeStop}`);
+    const alignmentAfterStop = track.trigger.history.loopStepCount - track.trigger.stepIndex;
+    assert.equal(alignmentAfterStop, alignmentBeforeStop, `stepsBeforeStop=${stepsBeforeStop}`);
+  }
+});
+
+test('a loop\'s bias to its activation point is exactly restored, for a stop before the pattern wraps', () => {
+  // The literal reported scenario: loop turned on halfway through an
+  // 8-step cycle, stopped (and rewound) shortly after with no pattern wrap
+  // in between -- walking the rewound cursor back up to that same halfway
+  // point must reproduce exactly the loop phase that was true at the
+  // moment the loop was turned on.
+  const stepDur = 0.05;
+  const baseParams = { steps: 8, pulses: 8, rotation: 0, logicOp: 1, probability: 0.5 };
+  const track = new Track(0, new Rng(5));
+  for (const [k, v] of Object.entries(baseParams)) track.setParam(k, v);
+  for (let i = 0; i < 4; i += 1) track.step(stepDur); // activate halfway through the 8-step cycle
+  track.setParam('trigLoop', true);
+  track.setParam('trigLoopLength', 6);
+  const loopStepCountAtActivation = track.trigger.history.loopStepCount;
+
+  for (let i = 0; i < 2; i += 1) track.step(stepDur); // stop well before the pattern wraps back to 4
+  track.resetPlayhead();
+
+  for (let i = 0; i < 4; i += 1) track.step(stepDur); // walk the rewound cursor back up to position 4
+  assert.equal(track.trigger.stepIndex, 4);
+  assert.equal(track.trigger.history.loopStepCount, loopStepCountAtActivation);
+});
+
+test('note/velocity/mod loops shift by the trigger\'s cursor too, not just the trigger\'s own loop', () => {
+  const stepDur = 0.05;
+  const baseParams = { steps: 4, pulses: 4, rotation: 0, logicOp: 1, probability: 0.5 };
+  const track = new Track(0, new Rng(3));
+  for (const [k, v] of Object.entries(baseParams)) track.setParam(k, v);
+  for (let i = 0; i < 3; i += 1) track.step(stepDur);
+  track.setParam('noteLoop', true);
+  track.setParam('noteLoopLength', 5);
+  for (let i = 0; i < 6; i += 1) track.step(stepDur);
+  const alignmentBeforeStop = track.note.history.loopStepCount - track.trigger.stepIndex;
+
+  track.resetPlayhead();
+  assert.equal(track.trigger.stepIndex, 0);
+  const alignmentAfterStop = track.note.history.loopStepCount - track.trigger.stepIndex;
+  assert.equal(alignmentAfterStop, alignmentBeforeStop);
 });
 
 test('untriggered steps are still emitted, so generators keep advancing', () => {
@@ -518,4 +622,23 @@ test('getTrigLoopWindow advances by exactly one step per step() call', () => {
   track.step(0.125);
   const after = track.getTrigLoopWindow(5);
   assert.deepEqual(after.slice(0, 4), before.slice(1));
+});
+
+test('getTrigLoopWindow(count, fromRingPosition) rotates the projection onto ring positions', () => {
+  // The ring overlay is indexed by Euclidean ring position, not by loop-phase
+  // order -- a snapshot taken mid-cycle (activating the loop, changing its
+  // length, switching tracks) has to land result[k] on ring position
+  // (fromRingPosition + k), or every sector but the one at position 0 shows
+  // the wrong value until the next revolution happens to correct it.
+  const track = new Track(0, new Rng(7));
+  track.setParam('trigLoop', true);
+  track.setParam('trigLoopLength', 5);
+
+  const raw = track.getTrigLoopWindow(6);
+  for (const fromRingPosition of [0, 1, 3, 5]) {
+    const rotated = track.getTrigLoopWindow(6, fromRingPosition);
+    for (let k = 0; k < 6; k += 1) {
+      assert.equal(rotated[(fromRingPosition + k) % 6], raw[k], `fromRingPosition=${fromRingPosition}, k=${k}`);
+    }
+  }
 });
