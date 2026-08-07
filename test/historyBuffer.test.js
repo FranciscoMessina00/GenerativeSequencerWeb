@@ -135,6 +135,109 @@ test('captureLoop at a mid-size length tiles loopWindow circularly past its own 
   }
 });
 
+test('captureLoop always ends its window at `current`, never a not-yet-consumed value', () => {
+  // Regression: for writeIndex 15 (the trigger register), any loopLength
+  // above 15 used to reach one step into the future instead -- the value
+  // already sitting at logical index `writeIndex`, generated but not yet
+  // promoted to `current` by the next advance(). 16 is the smallest length
+  // where that first bites, and also the single most natural loop length
+  // to reach for, which is exactly what surfaced it in practice.
+  const buf = new HistoryBuffer({ size: 32, writeIndex: 15, fill: makeFill() });
+  for (let i = 0; i < 40; i += 1) buf.advance(1000 + i);
+  const current = buf.current;
+
+  for (const length of [15, 16, 20, 31]) {
+    buf.captureLoop(length, 0);
+    // The newest captured value is always whatever was actually just
+    // consumed -- never anything ahead of it.
+    assert.equal(buf.loop[length - 1], current, `length=${length}`);
+    // The window is a contiguous run ending there, oldest first, with no
+    // gap or jump anywhere in between.
+    for (let i = 0; i < length; i += 1) {
+      assert.equal(buf.loop[i], current - (length - 1 - i), `length=${length}, i=${i}`);
+    }
+  }
+});
+
+test('captureLoop caps length at size - 1, not size -- one slot is always not-yet-consumed', () => {
+  const buf = new HistoryBuffer({ size: 32, writeIndex: 15, fill: makeFill() });
+  for (let i = 0; i < 40; i += 1) buf.advance(1000 + i);
+  const current = buf.current;
+
+  buf.captureLoop(32, 0); // the param range's own nominal max
+  assert.equal(buf.loopLength, 31);
+  assert.equal(buf.loop.length, 31);
+  assert.equal(buf.loop[30], current);
+  assert.equal(buf.loop[0], current - 30);
+});
+
+test('loopCurrent replays the captured phrase in its original order, not current-then-jump-back', () => {
+  // Regression: loopReadIndex used to be `loopLength - 2`, which -- once
+  // captureLoop was fixed to always end its window at `current` -- made the
+  // very first loop-mode read replay `current` a second time (an audible
+  // stutter, the exact same value that had just played live moments before
+  // activation) before jumping back to the oldest captured value. It should
+  // instead continue straight on from `current` into `oldest`, walking the
+  // phrase forward in the order it actually played, then wrapping.
+  const buf = new HistoryBuffer({ size: 32, writeIndex: 15, fill: makeFill() });
+  for (let i = 0; i < 40; i += 1) buf.advance(1000 + i);
+  const current = buf.current;
+  buf.captureLoop(5, 0);
+  assert.deepEqual(buf.loop, [current - 4, current - 3, current - 2, current - 1, current]);
+
+  const played = [];
+  for (let i = 0; i < 7; i += 1) {
+    buf.advanceLoop();
+    played.push(buf.loopCurrent);
+  }
+  assert.deepEqual(
+    played,
+    [current - 4, current - 3, current - 2, current - 1, current, current - 4, current - 3],
+  );
+});
+
+test('loopPrevious always traces back to whatever loopCurrent produced one step earlier', () => {
+  const buf = new HistoryBuffer({ size: 32, writeIndex: 15, fill: makeFill() });
+  for (let i = 0; i < 40; i += 1) buf.advance(1000 + i);
+  const current = buf.current;
+  buf.captureLoop(5, 0);
+
+  // Before the loop has taken a single step, its glide origin is whatever
+  // was actually last played live -- not an artifact of how it was captured.
+  buf.advanceLoop();
+  assert.equal(buf.loopPrevious, current);
+
+  let prior = buf.loopCurrent;
+  for (let i = 0; i < 6; i += 1) {
+    buf.advanceLoop();
+    assert.equal(buf.loopPrevious, prior);
+    prior = buf.loopCurrent;
+  }
+});
+
+test('shiftLoopPlayhead translates the phase -- including negative -- without touching what was captured', () => {
+  const buf = new HistoryBuffer({ size: 32, writeIndex: 15, fill: makeFill() });
+  buf.captureLoop(5, 0);
+  const { loop, loopLength, loopReadIndex } = buf;
+  buf.advanceLoop();
+  buf.advanceLoop(); // loopStepCount === 2
+  const phase2Window = buf.loopWindow(5);
+
+  buf.shiftLoopPlayhead(5); // one full loopLength forward
+  assert.equal(buf.loopStepCount, 7);
+  assert.deepEqual(buf.loopWindow(5), phase2Window); // 7 mod 5 === 2, same phase
+
+  buf.shiftLoopPlayhead(-10); // two full loopLengths back, landing negative
+  assert.equal(buf.loopStepCount, -3);
+  assert.deepEqual(buf.loopWindow(5), phase2Window); // -3 mod 5 === 2, same phase again
+
+  // What was captured is untouched throughout -- a shift only ever moves
+  // the read position, never re-snapshots.
+  assert.equal(buf.loop, loop);
+  assert.equal(buf.loopLength, loopLength);
+  assert.equal(buf.loopReadIndex, loopReadIndex);
+});
+
 for (const writeIndex of [15, 31]) {
   test(`metamorphic: real HistoryBuffer matches the reference shifting algorithm over a long random run (writeIndex ${writeIndex})`, () => {
     let seed = writeIndex === 15 ? 0x1234 : 0x5678;

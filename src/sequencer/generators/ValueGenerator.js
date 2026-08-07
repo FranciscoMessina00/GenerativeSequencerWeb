@@ -38,6 +38,18 @@ export class ValueGenerator {
   }
 
   /**
+   * No pattern cursor of its own to rewind on transport stop (this is a
+   * continuous random walk, not a stepped pattern) -- but if looping, its
+   * phase still has to shift by the same amount the Euclidean cursor is
+   * retreating, or its alignment to the pattern jumps on every stop. `shift`
+   * comes from Track.resetPlayhead(), which reads the trigger's cursor
+   * before TriggerGenerator.resetPlayhead() zeroes it -- see there.
+   */
+  resetPlayhead(shift) {
+    if (this.loopEnabled) this.history.shiftLoopPlayhead(shift);
+  }
+
+  /**
    * Advance one step.
    * @param {object} params { bias, spread, ...post-processing params }
    * @returns {{ value: number, previous: number, raw: number }}
