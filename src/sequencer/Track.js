@@ -128,25 +128,49 @@ export class Track {
   }
 
   /**
-   * The rhythm loop's captured content, for the ring's buffer overlay --
-   * one value per ring position rather than per loop-phase order.
-   *
-   * `getLoopWindow(count)` itself is phase-0-first: its own result[0] is
-   * whatever the loop would read right now, result[1] one tick later, and
-   * so on -- correct to paint directly onto ring positions 0..count-1 only
-   * when the Euclidean cursor is ALSO at position 0 right now (true for
-   * main.js's one wrap-triggered caller, which reaches this exactly when
-   * the cursor has just landed back there). Every other caller reads mid-
-   * cycle, at whatever `fromRingPosition` the cursor currently sits at --
-   * pass it (`this.stepIndex`), or the overlay lines up with the wrong ring
-   * sectors until the next revolution happens to correct it on its own.
+   * The rhythm loop's next `count` random bits -- for the ring's buffer
+   * overlay, painted directly onto ring positions 0..count-1 with no
+   * rotation. Only correct when the Euclidean cursor is ALSO at position 0
+   * right now: main.js's one wrap-triggered caller reaches this exactly
+   * when the cursor has just landed back there, which is also why it needs
+   * no +1 lag correction -- the value for position 0 was already consumed
+   * (this step's own advanceLoop() already ran) by the time it calls this.
+   * Every other caller reads mid-cycle and wants getTrigLoopProjection()
+   * instead.
    */
-  getTrigLoopWindow(count, fromRingPosition = 0) {
-    const window = this.trigger.getLoopWindow(count);
-    if (fromRingPosition === 0) return window;
+  getTrigLoopWindow(count) {
+    return this.trigger.getLoopWindow(count);
+  }
+
+  /**
+   * The rhythm loop's upcoming content, one value per ring position, for a
+   * snapshot taken *before* any step has consumed a value under the current
+   * loop state -- activating the loop, changing its length/permutation
+   * while armed, or switching to a different track. `fromRingPosition`
+   * (pass `this.stepIndex`) is where result[0] lands; result[1] the ring
+   * position after that, wrapping.
+   *
+   * Two things getTrigLoopWindow's raw, phase-0-first result doesn't
+   * account for on its own, both handled here:
+   *
+   *  - Rotation: the cursor generally isn't at position 0 for these
+   *    callers, so painting the raw window directly would line result[0]
+   *    up with the wrong ring sector.
+   *  - The one-step lag: getLoopWindow's own k=0 is "whatever the loop
+   *    would read right now, with no further advance" -- but every
+   *    generator's step() always advances before it reads (that latency is
+   *    part of the feel; see HistoryBuffer), so the value that will
+   *    actually land on `fromRingPosition` is getLoopWindow's k=1, not
+   *    k=0. One extra raw value is requested to cover it.
+   *
+   * @param {number} count
+   * @param {number} fromRingPosition
+   */
+  getTrigLoopProjection(count, fromRingPosition) {
+    const window = this.trigger.getLoopWindow(count + 1);
     const aligned = new Array(count);
     for (let k = 0; k < count; k += 1) {
-      aligned[(fromRingPosition + k) % count - 1] = window[k];
+      aligned[(fromRingPosition + k) % count] = window[k + 1];
     }
     return aligned;
   }

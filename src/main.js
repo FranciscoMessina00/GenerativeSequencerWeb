@@ -129,19 +129,19 @@ const store = new ParamStore({
         // An immediate snapshot on top of activating gives feedback right away,
         // rather than waiting for the playhead to complete a full revolution --
         // taken mid-cycle, so it needs the current ring position to line up
-        // with the right sectors; see Track.getTrigLoopWindow.
+        // with the right sectors; see Track.getTrigLoopProjection.
         view?.setLoopActive(value);
         legendRandomEl.hidden = !value;
         if (value) {
           const track = tracks[trackId];
-          view?.setLoopSnapshot(track.getTrigLoopWindow(track.getPattern().length, track.stepIndex));
+          view?.setLoopSnapshot(track.getTrigLoopProjection(track.getPattern().length, track.stepIndex));
         }
       } else if ((key === 'trigLoopLength' || key === 'trigPerm') && tracks[trackId].params.trigLoop) {
         // A recapture changes the buffer's content immediately; refresh the
         // overlay too rather than leaving it showing what's now a stale
         // projection until the next revolution happens to complete.
         const track = tracks[trackId];
-        view?.setLoopSnapshot(track.getTrigLoopWindow(track.getPattern().length, track.stepIndex));
+        view?.setLoopSnapshot(track.getTrigLoopProjection(track.getPattern().length, track.stepIndex));
       }
     }
   },
@@ -451,8 +451,8 @@ function selectTrack(next) {
   legendRandomEl.hidden = !track.params.trigLoop;
   if (track.params.trigLoop) {
     // Read mid-cycle, same as the trigLoop-activation snapshot above -- see
-    // Track.getTrigLoopWindow for why this needs the current ring position.
-    view.setLoopSnapshot(track.getTrigLoopWindow(track.getPattern().length, track.stepIndex));
+    // Track.getTrigLoopProjection for why this needs the current ring position.
+    view.setLoopSnapshot(track.getTrigLoopProjection(track.getPattern().length, track.stepIndex));
   }
 
   // Assign mode is a question about one track's LFO, so it cannot survive the
