@@ -1,4 +1,4 @@
-import { FINE_DIVISOR, FULL_RANGE_PX } from './DragNumber.js';
+import { bindDragAxis, dragDeltaValue } from './dragGesture.js';
 import { decimalsFor, formatNumber, quantize } from './numberUtils.js';
 
 /**
@@ -46,6 +46,10 @@ export class FillIconControl {
     // dragging, seeing the caption is less useful than seeing the number it would
     // otherwise cost a whole row to display.
     this.hovering = false;
+    // A drag can leave the element while pointer-captured, so peeking has to key off
+    // this flag rather than :hover -- a full-range sweep is 180px, far more than the
+    // icon's own footprint.
+    this.dragging = false;
 
     this.element = document.createElement('div');
     this.element.className = 'fillicon';
@@ -129,7 +133,7 @@ export class FillIconControl {
 
   /** Hovering or mid-drag: close enough to be looking for the number, not the name. */
   #peeking() {
-    return this.hovering || this.dragStartY !== undefined;
+    return this.hovering || this.dragging;
   }
 
   #render() {
@@ -199,37 +203,27 @@ export class FillIconControl {
   #bind() {
     const el = this.element;
 
-    el.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      el.setPointerCapture(e.pointerId);
-      el.classList.add('is-dragging');
-      this.dragStartY = e.clientY;
-      this.dragStartValue = this.value;
-      // A drag can leave the element while pointer-captured, so peeking has to key off
-      // this flag rather than :hover -- a full-range sweep is 180px, far more than the
-      // icon's own footprint.
-      this.#render();
+    bindDragAxis({
+      element: el,
+      onDragStart: () => {
+        this.dragStartValue = this.value;
+        this.dragging = true;
+        this.#render();
+      },
+      onDragMove: (dy, shiftKey) => {
+        // Up is positive, so the glyph fills in the direction the hand moves.
+        this.#commit(dragDeltaValue(this.dragStartValue, dy, this.spec.max - this.spec.min, shiftKey));
+      },
+      onDragEnd: () => {
+        this.dragging = false;
+        this.#render();
+      },
+      onWheelNudge: (direction) => this.#nudge(direction),
+      onDblClick: () => this.#commit(this.spec.def),
+      onKeyNudge: (steps) => this.#nudge(steps),
+      onHome: () => this.#commit(this.spec.min),
+      onEnd: () => this.#commit(this.spec.max),
     });
-
-    el.addEventListener('pointermove', (e) => {
-      if (this.dragStartY === undefined) return;
-      // Up is positive, so the glyph fills in the direction the hand moves.
-      const dy = this.dragStartY - e.clientY;
-      let perPx = (this.spec.max - this.spec.min) / FULL_RANGE_PX;
-      if (e.shiftKey) perPx /= FINE_DIVISOR;
-      this.#commit(this.dragStartValue + dy * perPx);
-    });
-
-    const end = (e) => {
-      if (this.dragStartY === undefined) return;
-      this.dragStartY = undefined;
-      el.classList.remove('is-dragging');
-      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
-      this.#render();
-    };
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
 
     el.addEventListener('pointerenter', () => {
       this.hovering = true;
@@ -238,30 +232,6 @@ export class FillIconControl {
     el.addEventListener('pointerleave', () => {
       this.hovering = false;
       this.#render();
-    });
-
-    el.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      this.#nudge(e.deltaY < 0 ? 1 : -1);
-    }, { passive: false });
-
-    el.addEventListener('dblclick', () => this.#commit(this.spec.def));
-
-    el.addEventListener('keydown', (e) => {
-      const map = {
-        ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1,
-        PageUp: 10, PageDown: -10,
-      };
-      if (e.key in map) {
-        e.preventDefault();
-        this.#nudge(map[e.key]);
-      } else if (e.key === 'Home') {
-        e.preventDefault();
-        this.#commit(this.spec.min);
-      } else if (e.key === 'End') {
-        e.preventDefault();
-        this.#commit(this.spec.max);
-      }
     });
   }
 }

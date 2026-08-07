@@ -8,6 +8,10 @@
     "test": "node --test \"test/*.test.js\"",
     "serve": "python3 -m http.server 8080",
     "//typecheck": "Editors read jsconfig.json with no install. This is for a CLI or CI gate, and needs `npm i -D typescript` first.",
-    "typecheck": "tsc -p jsconfig.json"
+    "typecheck": "tsc -p jsconfig.json",
+    "//lint": "Needs `npm i -D eslint@9` first -- same ad-hoc pattern as typecheck.",
+    "lint": "eslint .",
+    "//test:browser": "Needs `npm i -D playwright && npx playwright install chromium` first. Runs the 9 test/browser/*-check.html pages headlessly -- see scripts/check-browser-pages.mjs.",
+    "test:browser": "node scripts/check-browser-pages.mjs"
   }
 }

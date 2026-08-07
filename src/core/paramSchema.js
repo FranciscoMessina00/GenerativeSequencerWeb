@@ -18,6 +18,8 @@
  * The UI builds itself from this list, so a range only ever needs changing here.
  */
 
+import { quantize } from './numberUtils.js';
+
 export const PARAM_SCHEMA = [
   // ---- Rhythm -------------------------------------------------------------
   // 5-in-16 by default, so the instrument makes a recognisable pattern on first
@@ -233,14 +235,6 @@ export function clampParam(key, value) {
   return Math.min(spec.max, Math.max(spec.min, numeric));
 }
 
-/** Decimal places implied by a step size, e.g. 0.01 -> 2, 1 -> 0. */
-function decimalsFor(step) {
-  if (!Number.isFinite(step) || step <= 0) return 0;
-  const text = String(step);
-  const dot = text.indexOf('.');
-  return dot === -1 ? 0 : text.length - dot - 1;
-}
-
 /**
  * Clamp *and* snap to the param's step -- the canonical form of a value.
  *
@@ -262,9 +256,5 @@ export function normalizeParam(key, value) {
   if (spec.values) return nearestValue(numeric, spec.values);
 
   const step = spec.step > 0 ? spec.step : 1;
-  const snapped = Math.round(numeric / step) * step;
-  const clamped = Math.min(spec.max, Math.max(spec.min, snapped));
-  // Snapping by multiplication leaves float dust (0.30000000000000004); the
-  // decimals implied by the step are exactly enough to clear it.
-  return Number(clamped.toFixed(decimalsFor(step)));
+  return quantize(numeric, spec.min, spec.max, step);
 }

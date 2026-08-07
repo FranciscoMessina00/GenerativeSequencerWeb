@@ -1,0 +1,61 @@
+# What "passing" means for this repo, as a reusable workflow -- called from both
+# ci.yml (every push and PR, nothing built or published) and deploy.yml (before a
+# release is built and deployed). One definition, so the bar a push has to clear
+# and the bar a release has to clear can never quietly drift apart.
+#
+# `workflow_call` is the only trigger: this file never runs on its own, only when
+# another workflow in this repo references it via `uses: ./.github/workflows/verify.yml`.
+name: Verify
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Run tests
+        run: npm test
+
+      - name: Type-check
+        run: |
+          npm install --no-save typescript@5
+          npm run typecheck
+
+      - name: Lint
+        run: |
+          npm install --no-save eslint@9
+          npm run lint
+
+  # Separate from `verify`, not a step inside it: this one needs a real browser
+  # binary rather than just a package, and it is checking a different layer --
+  # the interactive controls under src/ui/, which `npm test` cannot reach at all
+  # (they are DOM-heavy and have no jsdom/browser stand-in in that suite -- see
+  # test/browser/*-check.html's own header comments). Runs the 9 non-selftest
+  # check pages for real in headless Chromium; selftest.html stays excluded and
+  # non-gating, per its own documented raciness.
+  verify-browser:
+    runs-on: ubuntu-latest
+    # Longer than the other job's 5 minutes: installing Chromium plus its system
+    # dependencies on a cold runner is the slow part, not the 9 quick page checks.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Browser checks
+        run: |
+          npm install --no-save playwright@1
+          npx playwright install --with-deps chromium
+          npm run test:browser

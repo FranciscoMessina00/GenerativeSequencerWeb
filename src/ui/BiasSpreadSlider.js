@@ -1,4 +1,5 @@
-import { DragNumber, FINE_DIVISOR, FULL_RANGE_PX } from './DragNumber.js';
+import { DragNumber } from './DragNumber.js';
+import { dragDeltaValue } from './dragGesture.js';
 import { axisLockIcon } from './icons.js';
 import { clamp, formatNumber, quantize } from './numberUtils.js';
 import { midiNoteName } from './noteNames.js';
@@ -324,9 +325,8 @@ export class BiasSpreadSlider {
     // is no one pixel-to-range mapping a fixed-height track could offer both.
     const commitSpreadFromDelta = (e) => {
       const dy = this.dragStartY - e.clientY;
-      let perPx = (this.spreadSpec.max - this.spreadSpec.min) / FULL_RANGE_PX;
-      if (e.shiftKey) perPx /= FINE_DIVISOR;
-      this.#commitSpread(this.dragStartSpread + dy * perPx);
+      const range = this.spreadSpec.max - this.spreadSpec.min;
+      this.#commitSpread(dragDeltaValue(this.dragStartSpread, dy, range, e.shiftKey));
     };
 
     el.addEventListener('pointerdown', (e) => {

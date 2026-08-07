@@ -447,19 +447,22 @@ class PercussionProcessor extends AudioWorkletProcessor {
   /**
    * Latch one hit's settings, and set `lifeRemaining` -- the pool reclaims a voice the
    * moment that reaches zero, so a subclass that forgets it is a voice that never frees.
+   * Unimplemented here on purpose: every real instrument overrides this. Parameters are
+   * still named and documented, since this signature is the interface a subclass fills in.
    *
-   * @param {object} v the voice being started
-   * @param {object} msg the note-on
+   * @param {object} _v the voice being started
+   * @param {object} _msg the note-on
    */
-  initVoice(v, msg) {}
+  initVoice(_v, _msg) {}
 
   /**
    * Render `length` samples into `out` starting at `offset`, additively, and decrement
-   * `lifeRemaining` by what was rendered.
+   * `lifeRemaining` by what was rendered. Unimplemented here for the same reason as
+   * `initVoice` above.
    *
-   * @param {object} v @param {Float32Array} out @param {number} offset @param {number} length
+   * @param {object} _v @param {Float32Array} _out @param {number} _offset @param {number} _length
    */
-  renderVoice(v, out, offset, length) {}
+  renderVoice(_v, _out, _offset, _length) {}
 }
 
 /**
