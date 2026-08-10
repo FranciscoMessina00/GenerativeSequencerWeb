@@ -1,0 +1,81 @@
+# Publishes a preview of the app to Cloudflare Pages -- a different site from
+# deploy.yml's production GitHub Pages -- for every branch other than master and
+# every pull request, so a change can be looked at (and heard: see below) before it
+# ever reaches a release.
+#
+# Cloudflare specifically, not a plain http:// server: AudioWorklet -- what this
+# app's entire audio engine is built on, see AudioEngine.js's addModule() calls --
+# is disabled by browsers on insecure origins. A preview served over bare http://
+# would load and look right, then make no sound at all. Cloudflare Pages is HTTPS
+# by default, so that problem does not exist here.
+#
+# One-time repo setup this workflow depends on: two secrets, CLOUDFLARE_API_TOKEN
+# and CLOUDFLARE_ACCOUNT_ID, under Settings -> Secrets and variables -> Actions.
+# Until both are set, this will fail at the deploy step with an auth error rather
+# than silently. See README.md's "Testing on a phone" section for how to get them.
+name: Preview
+
+on:
+  pull_request:
+  # Every branch except master -- that one already has ci.yml (verify only) and
+  # deploy.yml (verify, then build and publish production on a release). This is
+  # deliberately the complement of "master", not an allow-list of feature-branch
+  # naming conventions, so a branch never has to be named a particular way to get
+  # a preview.
+  push:
+    branches-ignore: [master]
+  # ...or on demand from the Actions tab, for a redeploy with no new push behind it.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The same bar a push to master already has to clear -- see verify.yml, which is
+  # what actually defines "passing" for this repo. Calling it here rather than
+  # keeping a second copy is what stops the two from quietly drifting apart.
+  verify:
+    uses: ./.github/workflows/verify.yml
+
+  preview:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # The exact allow-list deploy.yml stages for production, kept in sync by hand
+      # rather than factored into a shared reusable workflow -- four lines, both
+      # copies visible side by side in any PR that touches either, which is a much
+      # smaller drift risk than the "what counts as passing" duplication verify.yml
+      # exists to prevent. Revisit that call if this ever grows past a few lines.
+      - name: Stage the public site
+        run: |
+          mkdir _site
+          cp index.html _site/
+          cp -r src styles presets _site/
+
+      # `wrangler pages deploy` does NOT create the project itself -- it 404s
+      # ("Project not found") the first time, before one exists. This does, and is
+      # idempotent: `|| true` swallows the "already exists" error every run after
+      # the first, so nobody has to click through the Cloudflare dashboard by hand
+      # to bootstrap it. The production branch named here is irrelevant to this
+      # repo (deploy.yml/GitHub Pages is what "production" means here); Pages
+      # requires the flag to exist regardless.
+      - name: Ensure the Cloudflare Pages project exists
+        run: npx wrangler pages project create generative-sequencer-preview --production-branch=master || true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Prints that push's own deployment URL in the job log every run.
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy _site --project-name=generative-sequencer-preview
