@@ -1,0 +1,201 @@
+<!doctype html>
+<!-- Manual check for ScrollIndicator: that it builds its own thumb, writes the two
+     custom properties as plain readable px values, tracks the scroll position, ends
+     flush with the bottom of its track, and hides the thumb when there is nothing to
+     scroll. The geometry itself is covered in Node by test/scrollThumb.test.js --
+     this page is about the DOM wiring around it.
+
+     Driven from an ordinary overflow container rather than the document: the widget
+     takes its scroller as a constructor option precisely so a test can pin exact
+     numbers instead of depending on this page's own height, and Playwright runs
+     these at 1280px where the 640px gutter query never fires anyway. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+/* The strip is display:none until 640px and fixed to the viewport edge. Both are
+   overridden here so it sits in the flow at a height this page controls -- what is
+   under test is the arithmetic reaching the DOM, not the media query. */
+.scrollind{display:block;position:static;height:400px;}
+/* The scroll container the indicator is pointed at. 400px of window onto 1200px of
+   content, so the thumb should be exactly a third of the track. */
+#scroller{height:400px;overflow:auto;width:200px;}
+#content{height:1200px;}</style>
+</head>
+<body>
+<div class="scrollind" id="scrollind"></div>
+<div id="scroller"><div id="content"></div></div>
+<div class="scrollind" id="scrollind-fits"></div>
+<div id="scroller-fits" style="height:400px;overflow:auto;width:200px;"><div style="height:100px;"></div></div>
+<pre id="log"></pre>
+<script type="module">
+import { ScrollIndicator } from '../../src/ui/ScrollIndicator.js';
+
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+/* For values that are read back rounded to whole pixels but derived here from
+   another already-rounded readback -- the two roundings can legitimately disagree
+   by one. */
+const checkNear = (name, actual, expected, tolerance = 1) => {
+  const ok = Math.abs(actual - expected) <= tolerance;
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ~${expected})`}`);
+};
+
+const scroller = document.getElementById('scroller');
+const strip = document.getElementById('scrollind');
+const indicator = new ScrollIndicator(strip, { scroller, scrollSource: scroller });
+const thumb = indicator.thumbEl;
+
+const px = (name) => thumb.style.getPropertyValue(`--thumb-${name}`);
+const num = (name) => parseFloat(px(name));
+const hidden = () => thumb.classList.contains('is-hidden');
+
+const TRACK = 400;
+
+log('-- structure --');
+check('builds its own thumb', Boolean(document.querySelector('#scrollind .scrollind__thumb')), true);
+check('the thumb is the element the class exposes', thumb, document.querySelector('#scrollind .scrollind__thumb'));
+check('the track measured as expected', strip.clientHeight, TRACK);
+
+log('\n-- at the top --');
+check('thumb is shown, there is scrolling to do', hidden(), false);
+// 400 of 1200 visible -> a third of a 400px track.
+check('height is the visible fraction', px('height'), '133px');
+check('...written as a plain px value, no calc()', /^\d+px$/.test(px('height')), true);
+check('top starts at zero', px('top'), '0px');
+
+log('\n-- scrolled to the middle --');
+// Full scroll is 1200 - 400 = 800, so 400 is exactly halfway.
+scroller.scrollTop = 400;
+indicator.update();
+const midTop = num('top');
+// The class derives top from the *unrounded* height, so recomputing it here from
+// the rounded readback can land a pixel out -- what matters is that the thumb is
+// centred in the track, not which way that half-pixel went.
+checkNear('halfway down its travel', midTop, (TRACK - num('height')) / 2);
+check('still the same height', px('height'), '133px');
+
+log('\n-- scrolled to the end --');
+scroller.scrollTop = 800;
+indicator.update();
+check('thumb bottom lands on the track bottom', num('top') + num('height'), TRACK);
+check('moved further down than the midpoint', num('top') > midTop, true);
+
+log('\n-- back to the top --');
+scroller.scrollTop = 0;
+indicator.update();
+check('returns to zero rather than sticking', px('top'), '0px');
+
+log('\n-- a container whose content fits --');
+const fitsStrip = document.getElementById('scrollind-fits');
+const fits = new ScrollIndicator(fitsStrip, {
+  scroller: document.getElementById('scroller-fits'),
+  scrollSource: document.getElementById('scroller-fits'),
+});
+check('nothing to scroll, so no thumb', fits.thumbEl.classList.contains('is-hidden'), true);
+
+log('\n-- a zero-height track (what display:none gives above 640px) --');
+const offStrip = document.createElement('div');
+offStrip.className = 'scrollind';
+offStrip.style.cssText = 'display:none;';
+document.body.appendChild(offStrip);
+const off = new ScrollIndicator(offStrip, { scroller, scrollSource: scroller });
+check('draws nothing when its strip is hidden', off.thumbEl.classList.contains('is-hidden'), true);
+
+log('\n-- scroll events drive it without an explicit update() --');
+scroller.scrollTop = 800;
+scroller.dispatchEvent(new Event('scroll'));
+// The class coalesces through requestAnimationFrame, so wait a frame before reading.
+await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+check('a scroll event moved the thumb on its own', num('top') + num('height'), TRACK);
+
+log('\n-- dragging: the bar scrolls like a scrollbar, not like a pan --');
+// setPointerCapture is parked for the duration, the same way trigger-controls-check
+// does it: a synthetic PointerEvent has no active pointer for the browser to capture.
+const drag = (fromY, toY) => {
+  const capture = strip.setPointerCapture;
+  const hasCapture = strip.hasPointerCapture;
+  strip.setPointerCapture = () => {};
+  strip.hasPointerCapture = () => false;
+  const at = (type, clientY) => strip.dispatchEvent(new PointerEvent(type, {
+    pointerId: 1, button: 0, clientY, bubbles: true, cancelable: true,
+  }));
+  // The strip is in the flow on this page, so clientY has to clear its own offset.
+  const offset = strip.getBoundingClientRect().top;
+  at('pointerdown', offset + fromY);
+  at('pointermove', offset + toY);
+  at('pointerup', offset + toY);
+  strip.setPointerCapture = capture;
+  strip.hasPointerCapture = hasCapture;
+};
+
+scroller.scrollTop = 0;
+indicator.update();
+// Grab the thumb at its top and pull down a quarter of the track.
+drag(0, 100);
+const draggedDown = scroller.scrollTop;
+check('dragging DOWN scrolls further DOWN the page', draggedDown > 0, true);
+// 100px of a (400 - 133) = 267px travel, over 800px of scrollable content.
+checkNear('...proportionally to the travel', draggedDown, (100 / (TRACK - 133)) * 800, 2);
+
+// ...and back up again.
+indicator.update();
+const beforeUp = scroller.scrollTop;
+drag(150, 20);
+check('dragging UP scrolls back toward the top', scroller.scrollTop < beforeUp, true);
+
+log('\n-- dragging past either end stops at the end --');
+scroller.scrollTop = 0;
+indicator.update();
+drag(0, 5000);
+check('cannot be dragged past the bottom', Math.round(scroller.scrollTop), 800);
+indicator.update();
+drag(200, -5000);
+check('cannot be dragged past the top', Math.round(scroller.scrollTop), 0);
+
+log('\n-- a strip with nothing to scroll ignores drags --');
+{
+  const capture = fitsStrip.setPointerCapture;
+  fitsStrip.setPointerCapture = () => {};
+  const at = (type, clientY) => fitsStrip.dispatchEvent(new PointerEvent(type, {
+    pointerId: 1, button: 0, clientY, bubbles: true, cancelable: true,
+  }));
+  const offset = fitsStrip.getBoundingClientRect().top;
+  at('pointerdown', offset + 10);
+  at('pointermove', offset + 200);
+  at('pointerup', offset + 200);
+  fitsStrip.setPointerCapture = capture;
+  check('a hidden thumb means the drag does nothing', fits.dragging, false);
+}
+
+log('\n-- the insets stop the bar short of the fixed chrome --');
+{
+  const inset = document.createElement('div');
+  inset.className = 'scrollind';
+  // Fixed, as in the real page, so top/bottom actually position it -- and height
+  // back to auto, or this page's own 400px override would win over both.
+  inset.style.cssText = 'display:block;position:fixed;right:0;width:28px;height:auto;';
+  document.body.appendChild(inset);
+  const withInsets = new ScrollIndicator(inset, {
+    scroller,
+    scrollSource: scroller,
+    insets: () => ({ top: 60, bottom: 40 }),
+  });
+  check('top is written from the measured header height', inset.style.top, '60px');
+  check('bottom is written from the measured info-bar height', inset.style.bottom, '40px');
+  const expected = window.innerHeight - 60 - 40;
+  check('so the track is only the band between them', inset.clientHeight, expected);
+  check('and the thumb is sized against that band, not the viewport',
+    parseFloat(withInsets.thumbEl.style.getPropertyValue('--thumb-height')) < expected, true);
+}
+
+log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'scroll-indicator-check-done' : 'scroll-indicator-check-failed';
+</script>
+</body>
+</html>

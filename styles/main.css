@@ -95,6 +95,12 @@
      these never follow the accent. */
   --rest: rgba(255, 255, 255, 0.055);
   --rest-line: rgba(255, 255, 255, 0.16);
+
+  /* The one non-colour token, and the only place the phone gutter's width is
+     written: body's padding, .infobar's inset and .scrollind's width all read it,
+     and all three must agree. Zero here so every one of them is a no-op at desktop
+     widths; the media query beside `.tabs` is what turns it on. See .scrollind. */
+  --gutter: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -1581,5 +1587,114 @@ input[type="range"]::-moz-range-thumb {
   }
   .infobar__lane {
     overflow-x: auto;
+  }
+}
+
+/* ---- scroll gutter: the phone-only strip down the right edge ---- */
+
+/* A real scrollbar for phones, in a column reserved so that dragging it can never
+   land on a control. Every other vertical strip of this instrument is a drag
+   control -- .dragnum, .bsslider__track and .fillicon all set `touch-action: none`,
+   which kills a pan before any JS runs -- so without this a touch meant as a scroll
+   lands as an edit. See src/ui/ScrollIndicator.js for why relaxing touch-action on
+   those instead does not work.
+
+   `touch-action: none` here too, and for once that is the point: the drag is
+   handled as a scrollbar drag rather than as a pan, so pulling down walks *down*
+   the page the way a scrollbar does, instead of dragging the page down the way a
+   pan does. Either way the gesture only ever scrolls -- it can never edit a value,
+   which is what the column is for.
+
+   display:none is what switches the whole widget off above the breakpoint: the
+   class reads this element's height, finds zero, and draws nothing. Its width is
+   --gutter, the same token the content's padding clears, so the strip and the space
+   it sits in cannot disagree.
+
+   top and bottom are placeholders: ScrollIndicator writes the measured header and
+   info-bar heights over them, so the bar spans the gap between the two pieces of
+   fixed chrome rather than running underneath them -- see its `insets` option. */
+.scrollind {
+  display: none;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--gutter);
+  touch-action: none;
+  cursor: grab;
+  z-index: 10;
+  background: var(--well);
+  /* The hairline the header and the info bar both use on the edge facing the
+     content, so the gutter reads as chrome rather than as clipped page. */
+  border-left: 1px solid var(--line);
+}
+.scrollind.is-dragging { cursor: grabbing; }
+
+/* Positioned from the two custom properties ScrollIndicator writes, both plain
+   unit-bearing px values. Narrower than the strip and centred, so the thumb is a
+   marker inside a lane rather than a filled column. */
+.scrollind__thumb {
+  position: absolute;
+  /* Decoration only: the drag is handled on the strip, so the thumb must never be
+     the event target -- grabbing it and grabbing the track beside it are the same
+     gesture. */
+  pointer-events: none;
+  left: 50%;
+  width: 5px;
+  margin-left: -2.5px;
+  top: var(--thumb-top, 0px);
+  height: var(--thumb-height, 0px);
+  border-radius: 3px;
+  background: var(--accent-50);
+}
+
+/* Nothing to scroll. Hidden rather than collapsed to zero height so the gutter
+   itself stays put and the layout never shifts. */
+.scrollind__thumb.is-hidden {
+  display: none;
+}
+
+/* The phone layout: reserve the gutter and reveal the strip in it. The only place
+   either is switched on, and the only place 640px is written for them --
+   ScrollIndicator.js carries no matchMedia, it simply measures a zero-height track
+   above this width and draws nothing.
+
+   Deliberately at the end of the file rather than beside the `.tabs` query it
+   shares a breakpoint with: `.scrollind`'s own `display: none` above has identical
+   specificity, so an earlier rule would lose to it on source order. */
+@media (max-width: 640px) {
+  :root { --gutter: 28px; }
+  .scrollind { display: block; }
+
+  /* The scrolling content clears the bar; the header and the info bar deliberately
+     do not, so both keep the full width of the screen.
+
+     The gutter is added to the page padding rather than replacing it, so the two
+     margins match: content sits 18px from the screen's left edge, and 18px from the
+     bar on the right. Replacing it instead would leave the content flush against
+     the bar with nothing to breathe. The 18px is the same figure the shorthands
+     above set on the left of both rules -- change one and this has to follow. */
+  .tabs-row,
+  main {
+    padding-right: calc(18px + var(--gutter));
+  }
+
+  /* A grid item's min-width defaults to auto, i.e. to its own content's intrinsic
+     minimum -- so a column that cannot fit widens its track and pushes the whole
+     column out past the bar rather than shrinking. Below 360px or so that is
+     exactly what happened. Letting them shrink is what keeps the margin above
+     honest at every width. */
+  main > *,
+  .panel > * {
+    min-width: 0;
+  }
+
+  /* What was actually too wide once they could shrink: three glyph controls and two
+     20px gaps needed 242px against the ~230px a 320px screen leaves. A tighter gap
+     fits them comfortably again, and wrapping is the backstop for anything narrower
+     still -- better a second line than a row sticking out under the bar. */
+  .trig-row {
+    gap: 12px;
+    flex-wrap: wrap;
   }
 }

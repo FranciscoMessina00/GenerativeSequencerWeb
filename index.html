@@ -73,6 +73,13 @@
        every hover, and each control already carries its own aria-label. -->
   <footer class="infobar" id="infobar" aria-live="off"></footer>
 
+  <!-- The phone-only scroll gutter: a strip with no drag control in it, so there is
+       somewhere on a touch screen that is always safe to pan. Empty here -- its
+       thumb is built by src/ui/ScrollIndicator.js -- and hidden by the stylesheet
+       above 640px. aria-hidden because it is decoration: the document's own scroll
+       position is what a screen reader should report, not a second copy of it. -->
+  <div class="scrollind" id="scrollind" aria-hidden="true"></div>
+
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

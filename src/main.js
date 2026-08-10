@@ -23,6 +23,7 @@ import { TrackTabs } from './ui/TrackTabs.js';
 import { InstrumentPanel } from './ui/InstrumentPanel.js';
 import { INSTRUMENT_GROUPS } from './audio/instruments.js';
 import { InfoBar } from './ui/InfoBar.js';
+import { ScrollIndicator } from './ui/ScrollIndicator.js';
 import { applyPalette, paletteFor } from './ui/palette.js';
 import { Modulation } from './modulation/Modulation.js';
 import { MOD_TARGETS } from './modulation/modTargets.js';
@@ -626,6 +627,28 @@ document.addEventListener('focusin', (e) => {
 document.addEventListener('pointerleave', () => infoBar.showHint());
 // A narrower bar can turn text that fitted into text that has to scroll.
 window.addEventListener('resize', () => infoBar.remeasure());
+
+// The phone-only scrollbar, in the column reserved down the right edge. Constructed
+// and then left alone: it owns its own scroll and resize listeners, and the
+// stylesheet's 640px query is what switches it on and off -- see ScrollIndicator.js.
+//
+// The header and the info bar keep the full width of the screen, so the bar is told
+// how much of the viewport each of them covers and spans only the gap between. Both
+// are measured rather than written down: the header stacks below 1000px and its
+// height moves again with whatever the status line wraps to.
+const headerEl = document.querySelector('header');
+new ScrollIndicator(document.getElementById('scrollind'), {
+  insets: () => ({
+    // The header is sticky at top:0, so once the page has moved at all its height
+    // and the amount of viewport it covers are the same number.
+    top: headerEl.getBoundingClientRect().height,
+    bottom: infoBar.element.getBoundingClientRect().height,
+  }),
+  // The two it measures, plus the page itself: selecting a track swaps the whole
+  // control panel, which changes how much there is to scroll without any of the
+  // events above firing.
+  observe: [headerEl, infoBar.element, document.body],
+});
 
 // ---------------------------------------------------------------------------
 // Transport
