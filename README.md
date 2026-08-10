@@ -362,6 +362,24 @@ Actions** (not "Deploy from a branch"). Every asset reference in the app is
 document-relative, so the site works unchanged under a project subpath like
 `/WebGenerativeSequencer/`.
 
+### Previews
+
+[`.github/workflows/preview.yml`](.github/workflows/preview.yml) is the same idea
+aimed at a different site: every push to a branch other than `master`, and every
+pull request, stages the app the same way and deploys it to **Cloudflare Pages**
+instead of GitHub Pages — a second, separate URL that moves on every push, so a
+branch can be looked at (and heard) before it is anywhere near a release. Cloudflare
+specifically because it is HTTPS by default, which plain `http://` is not, and this
+app's audio needs a secure origin — see [Testing on a phone](#testing-on-a-phone).
+
+Depends on two repo secrets under **Settings → Secrets and variables → Actions**:
+`CLOUDFLARE_API_TOKEN` (a token scoped to *Cloudflare Pages: Edit*, from *My
+Profile → API Tokens*) and `CLOUDFLARE_ACCOUNT_ID` (shown on the *Workers & Pages*
+dashboard page). Until both exist the workflow fails at the deploy step with an
+auth error rather than silently. Nothing else needs creating by hand — the
+`generative-sequencer-preview` Pages project is created automatically the first
+time the workflow deploys.
+
 ## Physical model
 
 Each track gets its own chain, and they sum into one fader:
@@ -431,6 +449,39 @@ darker tail of a real string; `damping = 0` makes all modes decay together.
 ```bash
 npm run serve    # Python HTTP server on port 8080
 ```
+
+## Testing on a phone
+
+`npm run serve`'s Python server already binds every network interface, not just
+`localhost` — no flag needed — so a phone on the same Wi-Fi can already reach
+`http://<your PC's LAN IP>:8080` today. But that is `http://`, an insecure origin,
+and **`AudioWorklet` — what this app's entire audio engine is built on — is
+disabled by browsers on insecure origins.** The page loads and looks right; nothing
+makes a sound, and nothing tells you why. Fine for checking layout, useless for
+checking audio. Three ways around that, in order of how little setup they need:
+
+- **Cloudflare Quick Tunnel — recommended.** One binary, no account:
+  ```bash
+  cloudflared tunnel --url http://localhost:8080
+  ```
+  Open the `https://<random>.trycloudflare.com` URL it prints, on the phone. Real
+  HTTPS, so `AudioWorklet` works, and it isn't limited to the same Wi-Fi — cellular
+  data reaches it too.
+- **Android over USB** — the literal "plug the phone into the PC" option. Enable
+  USB debugging, then:
+  ```bash
+  adb reverse tcp:8080 tcp:8080
+  ```
+  and open `http://localhost:8080` in the phone's Chrome. To the phone that is
+  genuinely `localhost`, which counts as a secure context too — audio works, and
+  nothing leaves the machine.
+- **iOS** has no equivalent arbitrary-PC USB port-forward without Xcode; use the
+  Cloudflare Quick Tunnel above instead.
+
+For anything that should be reachable without the PC running at all — a PR you
+want a second opinion on, a branch you want to check later — every push to a
+branch other than `master` (and every pull request) auto-deploys to its own
+Cloudflare Pages preview URL; see [Deploying](#deploying) below.
 
 ## Test
 
