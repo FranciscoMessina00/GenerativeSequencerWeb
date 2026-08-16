@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scrollThumb } from '../src/ui/scrollThumb.js';
+import { scrollThumb, THUMB_MARGIN_PX } from '../src/ui/scrollThumb.js';
 
 /**
  * The scroll indicator's geometry. Pure arithmetic, so it is checked here rather
@@ -48,20 +48,24 @@ test('a very long page still gets a visible thumb, and it never exceeds the trac
   assert.equal(floored.height, 24);
   assert.ok(floored.height <= TALL.trackHeight);
 
-  // ...and the floor cannot push the thumb past the end of a short track.
+  // ...and the floor cannot push the thumb past the end of a short track. The track
+  // is too short to spare the margin too, so it shrinks to nothing rather than push
+  // the thumb past the track's own bottom.
   const short = scrollThumb({ ...TALL, scrollHeight: 100000, trackHeight: 10, minThumb: 24 });
   assert.equal(short.height, 10);
+  assert.equal(short.margin, 0);
   assert.equal(short.top, 0); // no travel left
 });
 
-test('the thumb starts at the top and ends flush with the track bottom', () => {
+test('the thumb keeps a margin off the top and off the track bottom', () => {
   const atTop = scrollThumb(TALL);
-  assert.equal(atTop.top, 0);
+  assert.equal(atTop.top, THUMB_MARGIN_PX);
+  assert.equal(atTop.margin, THUMB_MARGIN_PX);
 
   // Full scroll is scrollHeight - clientHeight.
   const atEnd = scrollThumb({ ...TALL, scrollTop: 1600 });
-  assert.equal(atEnd.top, TALL.trackHeight - atEnd.height);
-  assert.equal(atEnd.top + atEnd.height, TALL.trackHeight);
+  assert.equal(atEnd.top, TALL.trackHeight - THUMB_MARGIN_PX - atEnd.height);
+  assert.equal(atEnd.top + atEnd.height, TALL.trackHeight - THUMB_MARGIN_PX);
 });
 
 test('halfway down the page puts the thumb halfway through its travel', () => {
@@ -75,8 +79,11 @@ test('the thumb advances monotonically and always stays inside the track', () =>
     const { hidden, height, top } = scrollThumb({ ...TALL, scrollTop });
     assert.equal(hidden, false, `scrollTop ${scrollTop}`);
     assert.ok(top >= previousTop, `thumb went backwards at scrollTop ${scrollTop}`);
-    assert.ok(top >= 0, `thumb left the top at scrollTop ${scrollTop}`);
-    assert.ok(top + height <= TALL.trackHeight + 1e-9, `thumb overran at scrollTop ${scrollTop}`);
+    assert.ok(top >= THUMB_MARGIN_PX, `thumb entered the margin at scrollTop ${scrollTop}`);
+    assert.ok(
+      top + height <= TALL.trackHeight - THUMB_MARGIN_PX + 1e-9,
+      `thumb overran at scrollTop ${scrollTop}`
+    );
     previousTop = top;
   }
 });
@@ -84,10 +91,10 @@ test('the thumb advances monotonically and always stays inside the track', () =>
 test('rubber-banding past either end clamps rather than leaving the track', () => {
   // iOS reports a scrollTop below 0 and above the maximum while bouncing.
   const above = scrollThumb({ ...TALL, scrollTop: -200 });
-  assert.equal(above.top, 0);
+  assert.equal(above.top, THUMB_MARGIN_PX);
 
   const below = scrollThumb({ ...TALL, scrollTop: 5000 });
-  assert.equal(below.top, TALL.trackHeight - below.height);
+  assert.equal(below.top, TALL.trackHeight - THUMB_MARGIN_PX - below.height);
 });
 
 test('nonsensical input reads as hidden rather than throwing', () => {

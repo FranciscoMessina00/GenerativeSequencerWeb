@@ -68,7 +68,7 @@ export class ScrollIndicator {
     /** Pending animation frame, so a burst of scroll events costs one update. */
     this.frame = null;
     /** Last geometry written, so a drag can map a pointer onto it. */
-    this.thumb = { hidden: true, height: 0, top: 0 };
+    this.thumb = { hidden: true, height: 0, top: 0, margin: 0 };
     /** Where inside the thumb the drag was started, so it does not jump. */
     this.grabOffset = 0;
     this.dragging = false;
@@ -140,12 +140,18 @@ export class ScrollIndicator {
    *
    * The mapping is deliberately the scrollbar's, not the pan's: a larger `y` is a
    * larger scrollTop, so pulling down moves further down the page.
+   *
+   * `this.thumb.margin` is scrollThumb()'s own figure, not a second copy of it --
+   * the thumb's travel band starts and ends that many pixels inside the track, so
+   * both ends of the mapping have to shift with it or a drag would land the thumb
+   * somewhere the pointer never was.
    */
   #scrollToPointer(y) {
-    const travel = this.element.clientHeight - this.thumb.height;
+    const margin = this.thumb.margin;
+    const travel = this.element.clientHeight - margin * 2 - this.thumb.height;
     if (travel <= 0) return;
 
-    const top = Math.min(travel, Math.max(0, y - this.grabOffset));
+    const top = Math.min(travel, Math.max(0, y - margin - this.grabOffset));
     const scrollable = this.scroller.scrollHeight - this.scroller.clientHeight;
     this.scroller.scrollTop = (top / travel) * scrollable;
   }
