@@ -97,7 +97,7 @@ export const PARAM_SCHEMA = [
   // An index into MOD_TARGETS, where 0 is "not mapped". Stored as a number so it
   // rides the normal snapshot path; `max` is written literally to keep this file
   // import-free, and a test pins it to MOD_TARGETS.length - 1 so the two cannot drift.
-  { key: 'lfoTarget', label: 'LFO Target', group: 'Modulation', target: 'modulation', min: 0, max: 25, step: 1, def: 0 },
+  { key: 'lfoTarget', label: 'LFO Target', group: 'Modulation', target: 'modulation', min: 0, max: 28, step: 1, def: 0 },
 
   // ---- Which instrument this track plays ----------------------------------
   // An index into INSTRUMENTS (src/audio/instruments.js), stored as a number so it
@@ -110,6 +110,33 @@ export const PARAM_SCHEMA = [
   // differ, since defaultsFor() cannot.
   { key: 'instrument', label: 'Instrument', group: 'Instrument', target: 'voice', values: [0, 1, 2, 3], min: 0, max: 3, step: 1, def: 0, display: 'instrument' },
 
+  // ---- Envelope: the one amplitude shape every instrument is played through --
+  // Absolute milliseconds, not fractions of a step, so a 30 ms attack is a 30 ms
+  // attack at any tempo -- see audio/envelope.js, which also owns what happens when
+  // a stage runs past the step it lands on.
+  //
+  // There is exactly one set of these per track, shared by whichever instrument the
+  // track plays, unlike the per-instrument `*Decay` params they replaced. Those were
+  // namespaced because one schema row cannot hold two ranges; these are absolute
+  // times, so there is nothing to namespace and one envelope is what "unified" means.
+  //
+  // `envHold` is the string's alone. The three percussion voices never read it -- see
+  // instruments.js, where their builders pass 0 -- and ui/EnvelopePanel.js hides the
+  // control for them, because a gated kick is a sustained tone rather than a hit.
+  // `curve: 'exp'` bends the drag, not the value: all three span thousands of
+  // milliseconds where the musically interesting settings are packed into the first
+  // few hundred, so a linear drag spent most of its travel on times nobody dials in
+  // and gave 22 ms a pixel down where 5 ms matters. See ui/dragGesture.js.
+  { key: 'envAttack', label: 'Attack', group: 'Envelope', target: 'voice', min: 0, max: 2000, step: 1, def: 10, display: 'ms', curve: 'exp' },
+  { key: 'envHold', label: 'Hold', group: 'Envelope', target: 'voice', min: 0, max: 1000, step: 1, def: 500, display: 'ms', curve: 'exp' },
+  // Also the string's ring: it is what modeDecays' decayScale is derived from, so the
+  // instrument has one decay value rather than two disagreeing ones.
+  { key: 'envDecay', label: 'Decay', group: 'Envelope', target: 'voice', min: 1, max: 4000, step: 1, def: 200, display: 'ms', curve: 'exp' },
+  // false = linear, true = exponential -- the same encoding glideMode uses, drawn
+  // with the same two glyphs. Exponential by default, unlike glide: a linear
+  // amplitude fall reads as a fade rather than as a struck note.
+  { key: 'envCurve', label: 'Envelope Curve', group: 'Envelope', target: 'voice', type: 'toggle', def: true },
+
   // ---- Modal string voice -------------------------------------------------
   // Pluck position lives here, not under Modulation -- it is a property of *where*
   // the string is plucked, the same as decay or damping are properties of how it
@@ -121,16 +148,20 @@ export const PARAM_SCHEMA = [
   { key: 'modes', label: 'Modes', group: 'String', target: 'voice', min: 4, max: 32, step: 1, def: 16 },
   // beta = stiffness / 1000, so 11 gives beta = 0.011 -- a realistic steel string.
   { key: 'stiffness', label: 'Stiffness (β×1000)', group: 'String', target: 'voice', min: 0, max: 40, step: 0.5, def: 11 },
-  { key: 'decay', label: 'Decay', group: 'String', target: 'voice', min: 0.25, max: 3, step: 0.01, def: 1 },
+  // No `decay` here any more: how long the string rings is `envDecay`, in the
+  // Envelope group above. Damping is still the *relative* rolloff between modes,
+  // which is a timbre and not a length -- see modal/modalModel.js's modeDecays.
   { key: 'damping', label: 'Damping (mode rolloff)', group: 'String', target: 'voice', min: 0, max: 1.5, step: 0.01, def: 0.5 },
   { key: 'pluckSoftness', label: 'Pluck Softness', group: 'String', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.35 },
 
   // ---- Percussion ---------------------------------------------------------
-  // Namespaced per instrument rather than sharing a `decay` and a `noiseColor`
-  // between them, because one schema row cannot hold two ranges: the string rings for
-  // 0.25-3 s and a kick for 0.05-2, and a hi-hat's decay tops out shorter than a
-  // snare's floor. Namespacing also means a track's bag keeps every instrument's
-  // settings, so switching voice and back loses nothing.
+  // Namespaced per instrument rather than sharing a `noiseColor` between them,
+  // because one schema row cannot hold two ranges. Namespacing also means a track's
+  // bag keeps every instrument's settings, so switching voice and back loses nothing.
+  //
+  // How long each of these rings is NOT here: that is `envDecay`, one value for the
+  // whole instrument. What is left in these groups is what makes a kick a kick rather
+  // than how long it lasts.
   //
   // Every `*NoiseColor` is a *tilt*, not a cutoff: 0 is a lowpassed copy of the noise,
   // 1 a highpassed one, 0.5 flat. A tilt keeps loudness roughly constant across the
@@ -138,7 +169,7 @@ export const PARAM_SCHEMA = [
 
   // Kick: a sine whose pitch falls from `note x sweep` to `note` over sweepTime,
   // with an optional noise burst on the attack.
-  { key: 'kickDecay', label: 'Kick Decay', group: 'Kick', target: 'voice', min: 0.05, max: 2, step: 0.01, def: 0.4 },
+  //
   // A multiplier on the starting pitch, so the sweep depth is independent of tuning.
   { key: 'kickSweep', label: 'Kick Sweep Amount', group: 'Kick', target: 'voice', min: 1, max: 8, step: 0.05, def: 3 },
   { key: 'kickSweepTime', label: 'Kick Sweep Time', group: 'Kick', target: 'voice', min: 0.005, max: 0.2, step: 0.001, def: 0.05 },
@@ -147,14 +178,15 @@ export const PARAM_SCHEMA = [
 
   // Snare: two resonators tuned from the note for the shell, plus a noise layer.
   // Two independent amounts rather than one crossfade, so either layer can be soloed.
-  { key: 'snareDecay', label: 'Snare Decay', group: 'Snare', target: 'voice', min: 0.03, max: 1.2, step: 0.01, def: 0.25 },
   { key: 'snareNoise', label: 'Snare Noise Amount', group: 'Snare', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.7, display: 'percent' },
   { key: 'snareNoiseColor', label: 'Snare Noise Colour', group: 'Snare', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.55, display: 'percent' },
   { key: 'snareTone', label: 'Snare Body Amount', group: 'Snare', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.4, display: 'percent' },
+  // Stays a param of its own, unlike the snare's overall length: this is how tight
+  // the tuned shell under the rattle is, a timbre rather than a second answer to
+  // "how long does this note last".
   { key: 'snareBodyDecay', label: 'Snare Body Decay', group: 'Snare', target: 'voice', min: 0.02, max: 0.6, step: 0.01, def: 0.12 },
 
-  // Hi-hat: filtered noise, band-centred on the note, with a fast decay.
-  { key: 'hatDecay', label: 'Hat Decay', group: 'Hi-hat', target: 'voice', min: 0.01, max: 0.6, step: 0.005, def: 0.08 },
+  // Hi-hat: filtered noise, band-centred on the note.
   { key: 'hatNoise', label: 'Hat Noise Amount', group: 'Hi-hat', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.9, display: 'percent' },
   { key: 'hatNoiseColor', label: 'Hat Noise Colour', group: 'Hi-hat', target: 'voice', min: 0, max: 1, step: 0.01, def: 0.8, display: 'percent' },
 

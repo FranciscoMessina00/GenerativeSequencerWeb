@@ -59,10 +59,14 @@ export function noiseTilt(color) {
  * multiplier rather than an interval so the sweep depth stays the same whatever the
  * drum is tuned to.
  *
- * Velocity scales amplitude only, not decay -- a soft kick is a quieter kick, not a
- * shorter one, unlike a plucked string where a light touch genuinely rings less.
+ * How long the hit lasts is not here: that is the shared AHD envelope, which the
+ * worklet applies to the whole voice -- see audio/envelope.js. What is left is the
+ * shape of the strike itself.
+ *
+ * Velocity scales amplitude only -- a soft kick is a quieter kick, not a shorter one,
+ * unlike a plucked string where a light touch genuinely rings less.
  */
-export function kickHit({ note, velocity, decay, sweep, sweepTime, noise, noiseColor }) {
+export function kickHit({ note, velocity, sweep, sweepTime, noise, noiseColor }) {
   const f0 = hzFor(note);
   const amount = clamp(sweep, 1, 8);
   return {
@@ -70,11 +74,12 @@ export function kickHit({ note, velocity, decay, sweep, sweepTime, noise, noiseC
     fStart: Math.min(MAX_HZ, f0 * amount),
     fEnd: f0,
     sweepTime: clamp(sweepTime, 0.001, 1),
-    decay: clamp(decay, MIN_DECAY, 4),
     amp: clamp(velocity, 0, 1),
     noiseAmp: clamp(noise, 0, 1),
     // A burst, not a layer: it belongs to the attack, so it is over long before the
-    // body is. Tied to the sweep, which is the part of the hit it punctuates.
+    // body is. Tied to the sweep, which is the part of the hit it punctuates -- and
+    // kept as its own envelope rather than folded into the shared one, because it
+    // shapes the transient *inside* the note rather than the note's own length.
     noiseDecay: Math.max(MIN_DECAY, clamp(sweepTime, 0.001, 1) * 0.8),
     tilt: noiseTilt(noiseColor),
   };
@@ -91,9 +96,14 @@ export function kickHit({ note, velocity, decay, sweep, sweepTime, noise, noiseC
  *
  * The two layers have independent amounts rather than one crossfade, so either can be
  * soloed to hear what it is contributing.
+ *
+ * How long the rattle lasts is the shared AHD envelope's business now. `bodyDecay`
+ * survives as a parameter of its own because it is not the same question: it is how
+ * tight the shell under the rattle is, and it rings inside the envelope rather than
+ * setting the note's length.
  */
 export function snareHit({
-  note, velocity, decay, noise, noiseColor, tone, bodyDecay,
+  note, velocity, noise, noiseColor, tone, bodyDecay,
 }) {
   const f0 = hzFor(note);
   const ratios = [1, 1.7];
@@ -103,7 +113,6 @@ export function snareHit({
     bodyDecay: clamp(bodyDecay, MIN_DECAY, 2),
     bodyAmp: clamp(tone, 0, 1),
     noiseAmp: clamp(noise, 0, 1),
-    noiseDecay: clamp(decay, MIN_DECAY, 2),
     tilt: noiseTilt(noiseColor),
     amp: clamp(velocity, 0, 1),
   };
@@ -134,12 +143,11 @@ export const HAT_OSC_RATIOS = [1, 1.25, 1.49, 1.7, 1.79, 2.55];
  * so the colour knob genuinely trades cluster presence for air, which is what it is
  * supposed to do.
  */
-export function hatHit({ note, velocity, decay, noise, noiseColor }) {
+export function hatHit({ note, velocity, noise, noiseColor }) {
   const base = hzFor(note);
   return {
     bandHz: Math.min(MAX_HZ, base * 8),
     oscHz: HAT_OSC_RATIOS.map((r) => Math.min(MAX_HZ, base * 4 * r)),
-    decay: clamp(decay, MIN_DECAY, 2),
     // 0 is the oscillator cluster alone, 1 is noise alone. Not a gain -- level comes
     // from the envelope, velocity and trim; this only shapes character, which is why
     // it can keep the old `noise` param and default.

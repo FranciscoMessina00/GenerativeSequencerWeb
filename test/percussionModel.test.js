@@ -8,9 +8,12 @@ import { midiToHz } from '../src/audio/modal/modalModel.js';
 const close = (a, b, tolerance = 1e-9) => Math.abs(a - b) <= tolerance;
 
 /** Schema defaults, so a test can vary one thing at a time. */
-const KICK = { note: 36, velocity: 0.8, decay: 0.4, sweep: 3, sweepTime: 0.05, noise: 0.15, noiseColor: 0.6 };
-const SNARE = { note: 48, velocity: 0.8, decay: 0.25, noise: 0.7, noiseColor: 0.55, tone: 0.4, bodyDecay: 0.12 };
-const HAT = { note: 60, velocity: 0.8, decay: 0.08, noise: 0.9, noiseColor: 0.8 };
+// No `decay` on any of the three: how long a hit lasts is the shared AHD envelope's,
+// built in audio/envelope.js and carried alongside these -- see audio/instruments.js.
+// What is left here is what makes each instrument sound like itself.
+const KICK = { note: 36, velocity: 0.8, sweep: 3, sweepTime: 0.05, noise: 0.15, noiseColor: 0.6 };
+const SNARE = { note: 48, velocity: 0.8, noise: 0.7, noiseColor: 0.55, tone: 0.4, bodyDecay: 0.12 };
+const HAT = { note: 60, velocity: 0.8, noise: 0.9, noiseColor: 0.8 };
 
 // ---------------------------------------------------------------------------
 // The colour tilt
@@ -65,14 +68,14 @@ test('sweep 1 is no sweep at all', () => {
   assert.ok(close(hit.fStart, hit.fEnd));
 });
 
-test('velocity scales the kick amplitude and leaves the decay alone', () => {
+test('velocity scales the kick amplitude and changes nothing else', () => {
   // Unlike a plucked string, where a light touch genuinely rings less: a soft kick is
-  // a quieter kick, not a shorter one.
+  // a quieter kick, not a shorter or a differently voiced one.
   const soft = kickHit({ ...KICK, velocity: 0.2 });
   const hard = kickHit({ ...KICK, velocity: 1 });
   assert.equal(soft.amp, 0.2);
   assert.equal(hard.amp, 1);
-  assert.equal(soft.decay, hard.decay);
+  assert.deepEqual({ ...soft, amp: null }, { ...hard, amp: null });
 });
 
 test('the kick noise burst is shorter than the sweep it punctuates', () => {
@@ -114,10 +117,13 @@ test('the snare\'s two layers are independent, so either can be soloed', () => {
   assert.equal(bodyOnly.bodyAmp, 0.4);
 });
 
-test('the snare\'s two decays are separate', () => {
-  const hit = snareHit({ ...SNARE, decay: 0.9, bodyDecay: 0.05 });
-  assert.equal(hit.noiseDecay, 0.9);
+test('the shell keeps a ring of its own, and the rattle no longer has one', () => {
+  // bodyDecay survived the move to the shared envelope because it is not the same
+  // question: it says how tight the shell under the rattle is, not how long the hit
+  // lasts. The rattle's own decay was the latter, so it went.
+  const hit = snareHit({ ...SNARE, bodyDecay: 0.05 });
   assert.equal(hit.bodyDecay, 0.05);
+  assert.equal('noiseDecay' in hit, false, 'the rattle is shaped by the envelope now');
 });
 
 // ---------------------------------------------------------------------------
@@ -200,12 +206,12 @@ test('every hit is finite, whatever it is handed', () => {
   }
 });
 
-test('no decay is ever zero, however low it is asked to go', () => {
+test('neither surviving decay is ever zero, however low it is asked to go', () => {
   // A zero decay is a click with no body, and in the worklet it would divide by zero.
+  // Only two are left here -- the kick's noise burst, tied to its sweep, and the
+  // snare's shell; the rest is the shared envelope's, guarded in envelope.js.
   for (const value of [0, -1, Number.NaN]) {
-    assert.ok(kickHit({ ...KICK, decay: value }).decay > 0);
-    assert.ok(snareHit({ ...SNARE, decay: value, bodyDecay: value }).noiseDecay > 0);
-    assert.ok(snareHit({ ...SNARE, decay: value, bodyDecay: value }).bodyDecay > 0);
-    assert.ok(hatHit({ ...HAT, decay: value }).decay > 0);
+    assert.ok(kickHit({ ...KICK, sweepTime: value }).noiseDecay > 0);
+    assert.ok(snareHit({ ...SNARE, bodyDecay: value }).bodyDecay > 0);
   }
 });

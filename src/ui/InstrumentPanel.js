@@ -15,6 +15,11 @@ import { Dropdown } from './Dropdown.js';
  * there is only one thing being chosen. It sits on the visible panel's heading, so the
  * question ("which instrument?") is next to its answer rather than somewhere general.
  *
+ * `extra` travels the same way and for the same reason: the amplitude envelope belongs
+ * to whichever instrument is playing, not to a section of its own, and there is one of
+ * it per track rather than one per instrument. Moving the node is cheaper and less
+ * error-prone than four copies writing to the same three parameters.
+ *
  * Split out of main.js so a check page can drive it without a whole bootstrap.
  */
 export class InstrumentPanel {
@@ -25,11 +30,14 @@ export class InstrumentPanel {
    * @param {Map<string, HTMLElement>} opts.headings group name -> its <h2>
    * @param {(value: number) => void} opts.onInput asked to change instrument; the
    *   store decides what actually happens, as with every other control
+   * @param {HTMLElement} [opts.extra] one widget to carry into the visible panel,
+   *   directly under its heading -- the envelope, in the app
    */
-  constructor({ spec, sections, headings, onInput }) {
+  constructor({ spec, sections, headings, onInput, extra }) {
     this.spec = spec;
     this.sections = sections;
     this.headings = headings;
+    this.extra = extra ?? null;
 
     this.dropdown = new Dropdown({
       spec,
@@ -78,6 +86,11 @@ export class InstrumentPanel {
 
     // Moving the node is the whole mechanism -- appendChild on a node that is already
     // somewhere else relocates it, so there is never more than one selector.
-    this.headings.get(instrument.group)?.append(this.dropdown.element);
+    const heading = this.headings.get(instrument.group);
+    heading?.append(this.dropdown.element);
+    // Straight under the heading, so it reads as "this instrument, shaped like this"
+    // and lands above the instrument's own controls rather than after them. `after`
+    // relocates for the same reason `append` does.
+    if (this.extra) heading?.after(this.extra);
   }
 }

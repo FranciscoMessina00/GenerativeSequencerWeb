@@ -16,6 +16,171 @@ const LOG_1000 = Math.log(1000);
 // and would fold back into the audible band, so the mode is muted instead.
 const MAX_OMEGA = Math.PI * 0.98;
 
+/**
+ * The T60, in seconds, the modes ring at while the envelope is holding the note open.
+ *
+ * A plucked string cannot physically be sustained, so an envelope's hold stage had
+ * nothing to hold: the modes decayed at their own rate underneath a gain sitting at
+ * full level, and a note was over before the hold was. Freezing the resonators for the
+ * duration of attack + hold is what makes the stage mean something -- the spectrum the
+ * pluck produced is held as it is, and the real per-mode decay (the one `damping`
+ * shapes) starts when the release does.
+ *
+ * 60 s rather than an infinite ring: a pole radius of exactly 1 is marginally stable,
+ * and this bank keeps its state in Float32Array, so rounding could as easily grow a
+ * mode as fade it. This is long enough that the longest hold the schema allows -- one
+ * second -- costs about a decibel, and short enough that every pole stays comfortably
+ * inside the unit circle.
+ */
+const SUSTAIN_T60 = 60;
+
+// ---------------------------------------------------------------------------
+// The shared AHD amplitude envelope
+//
+// Duplicated verbatim in modal-processor.js and percussion-processors.js, and
+// deliberately so: AudioWorkletGlobalScope has no module loader, so this cannot be
+// imported from audio/envelope.js the way the main thread imports it. Same situation
+// test/masterClip.test.js already polices for the clip curve, handled the same way --
+// test/workletEnvelope.test.js reads both files and fails if the two copies differ by
+// a character.
+//
+// This is the recursion form of audio/envelope.js's attackCurve/decayCurve: an add or
+// a multiply per sample instead of a Math.exp, the idiom this project already uses for
+// a decay. test/envelope.test.js runs this exact state machine against the closed form,
+// which is what holds the shape that is heard to the shape that is drawn.
+// ---------------------------------------------------------------------------
+
+/** −60 dB in nepers, and the span an offset −60 dB curve actually covers. */
+const ENV_LOG_1000 = Math.log(1000);
+const ENV_FLOOR = Math.exp(-ENV_LOG_1000);
+const ENV_SPAN = 1 - ENV_FLOOR;
+
+/** The stages, in the order one note passes through them. */
+const ENV_ATTACK = 0;
+const ENV_HOLD = 1;
+const ENV_DECAY = 2;
+const ENV_DONE = 3;
+
+/** Envelope state, preallocated on every voice like the rest of its fields. */
+function makeEnvelope() {
+  return {
+    /** False for a hit that carried no envelope -- see startEnvelope. */
+    active: false,
+    stage: ENV_DONE,
+    level: 1,
+    peak: 1,
+    remaining: 0,
+    exponential: false,
+    /** The un-normalised one-pole state, for the exponential curves. */
+    state: 1,
+    attackStep: 0,
+    attackFactor: 0,
+    holdFrames: 0,
+    decayFrames: 1,
+    decayStep: 0,
+    decayFactor: 0,
+    /** Attack + hold + decay, for sizing how long the voice can be heard. */
+    totalFrames: 0,
+  };
+}
+
+/**
+ * Latch one hit's envelope. `spec` is what audio/envelope.js's ahdEnvelope() returned,
+ * with its times in seconds and its step-boundary truncation already applied.
+ *
+ * A message with no envelope leaves this inactive, which renders as a constant 1 --
+ * so a note-on assembled by hand (the check pages under test/browser) still sounds
+ * rather than falling silent on a field it never knew to send.
+ */
+function startEnvelope(e, spec) {
+  if (!spec) {
+    e.active = false;
+    e.stage = ENV_DONE;
+    e.level = 1;
+    e.totalFrames = 0;
+    return;
+  }
+
+  const attackFrames = Math.round(spec.attack * sampleRate);
+  // The *requested* attack, not the truncated one: the curve is a function of what was
+  // asked for, which is what leaves a cut-short attack at spec.peak rather than at 1.
+  const fullFrames = Math.round(spec.attackFull * sampleRate);
+
+  e.active = true;
+  e.exponential = Boolean(spec.exponential);
+  e.peak = spec.peak;
+  e.state = 1;
+  e.holdFrames = Math.round(spec.hold * sampleRate);
+  e.decayFrames = Math.max(1, Math.round(spec.decay * sampleRate));
+  e.attackStep = attackFrames > 0 ? spec.peak / attackFrames : 0;
+  e.attackFactor = fullFrames > 0 ? Math.exp(-ENV_LOG_1000 / fullFrames) : 0;
+  e.decayStep = spec.peak / e.decayFrames;
+  e.decayFactor = Math.exp(-ENV_LOG_1000 / e.decayFrames);
+  e.totalFrames = attackFrames + e.holdFrames + e.decayFrames;
+
+  if (attackFrames > 0) {
+    e.stage = ENV_ATTACK;
+    e.level = 0;
+    e.remaining = attackFrames;
+  } else {
+    // A zero attack is at full level on its very first sample.
+    e.stage = ENV_HOLD;
+    e.level = spec.peak;
+    e.remaining = e.holdFrames;
+  }
+}
+
+/**
+ * One sample: the gain to multiply this frame by, with the state advanced past it.
+ * The level returned is the one from *before* the advance, which is what makes a zero
+ * attack audible on the frame the note starts rather than one frame later.
+ */
+function envelopeSample(e) {
+  if (!e.active) return 1;
+  const level = e.level;
+
+  if (e.stage === ENV_ATTACK) {
+    if (e.exponential) {
+      e.state *= e.attackFactor;
+      e.level = (1 - e.state) / ENV_SPAN;
+    } else {
+      e.level += e.attackStep;
+    }
+    e.remaining -= 1;
+    if (e.remaining <= 0) {
+      e.level = e.peak;
+      e.stage = ENV_HOLD;
+      e.remaining = e.holdFrames;
+      e.state = 1;
+    }
+  } else if (e.stage === ENV_HOLD) {
+    e.level = e.peak;
+    e.remaining -= 1;
+    if (e.remaining <= 0) {
+      e.stage = ENV_DECAY;
+      e.remaining = e.decayFrames;
+    }
+  } else if (e.stage === ENV_DECAY) {
+    if (e.exponential) {
+      e.state *= e.decayFactor;
+      e.level = (e.peak * (e.state - ENV_FLOOR)) / ENV_SPAN;
+    } else {
+      e.level -= e.decayStep;
+    }
+    e.remaining -= 1;
+    if (e.remaining <= 0 || e.level <= 0) {
+      e.level = 0;
+      e.stage = ENV_DONE;
+    }
+  } else {
+    e.level = 0;
+  }
+
+  return level;
+}
+
+// ---------------------------------------------------------------------------
+
 function makeVoice() {
   return {
     active: false,
@@ -25,7 +190,12 @@ function makeVoice() {
     count: 0,
 
     ratios: new Float32Array(MAX_MODES),
+    /** The pole radius currently in force: sustained while held, real once released. */
     r: new Float32Array(MAX_MODES),
+    /** The real one, from the note's own per-mode T60s. See SUSTAIN_T60. */
+    rDecay: new Float32Array(MAX_MODES),
+    /** True while the envelope is still in its attack or hold stage. */
+    sustaining: false,
     a1: new Float32Array(MAX_MODES),
     a2: new Float32Array(MAX_MODES),
     norm: new Float32Array(MAX_MODES),
@@ -37,6 +207,8 @@ function makeVoice() {
 
     f0From: 440,
     f0To: 440,
+    /** Whatever fundamental the coefficients were last built at -- see #updateCoefficients. */
+    f0Current: 440,
     glideTotal: 0,
     glideDone: 0,
     glideExp: false,
@@ -57,6 +229,16 @@ function makeVoice() {
     exciteAmp: 1,
     exciteLpCoef: 1,
     exciteLpState: 0,
+
+    /**
+     * The amplitude envelope over the whole voice. It does not replace the modes'
+     * own decay -- that is the string's physics, and `damping` shapes it per mode --
+     * it shapes the note on top of it. The two share one dial: envDecay sets both
+     * the ring the modes are given and this envelope's decay stage, so the string
+     * still has exactly one answer to "how long is this note". See
+     * audio/instruments.js's buildStringMessage.
+     */
+    env: makeEnvelope(),
 
     lifeRemaining: 0,
   };
@@ -117,6 +299,13 @@ class ModalProcessor extends AudioWorkletProcessor {
     v.peak = 0;
     v.startFrame = Math.round(msg.startTime * sampleRate);
 
+    // Whether this note has anything to hold open. A message with no envelope, or one
+    // whose attack and hold are both zero, goes straight to its natural decay -- which
+    // is what a plucked string did before there was an envelope at all.
+    const sustainSeconds = msg.env ? msg.env.attack + msg.env.hold : 0;
+    v.sustaining = sustainSeconds > 0;
+    const sustainRadius = Math.exp(-LOG_1000 / (SUSTAIN_T60 * sampleRate));
+
     for (let i = 0; i < count; i += 1) {
       v.ratios[i] = msg.ratios[i];
       v.gainFrom[i] = msg.gainsFrom[i];
@@ -126,7 +315,8 @@ class ModalProcessor extends AudioWorkletProcessor {
       // Pole radius from the mode's T60. Guarded because a zero decay would
       // divide by zero and a negative one would make the filter explode.
       const t60 = Math.max(0.005, msg.decays[i]);
-      v.r[i] = Math.exp(-LOG_1000 / (t60 * sampleRate));
+      v.rDecay[i] = Math.exp(-LOG_1000 / (t60 * sampleRate));
+      v.r[i] = v.sustaining ? sustainRadius : v.rDecay[i];
       v.y1[i] = 0;
       v.y2[i] = 0;
     }
@@ -160,10 +350,19 @@ class ModalProcessor extends AudioWorkletProcessor {
     // excitation contributes nothing and the modes are just ringing.
     v.exciteTail = Math.ceil(8 / v.exciteLpCoef);
 
-    // Retire the voice once its longest mode has decayed well past audibility.
+    startEnvelope(v.env, msg.env);
+
+    // Retire the voice once its longest mode has decayed well past audibility -- or
+    // once the envelope has closed over it, whichever comes first. A short envelope
+    // over a long ring is otherwise seconds of CPU spent rendering a muted tail.
+    //
+    // The natural life is counted from the release, not from the note-on: while the
+    // envelope holds the note open the modes are frozen and have not started spending
+    // it yet, so measuring from zero would cut a held note's tail short.
     let longest = 0;
     for (let i = 0; i < count; i += 1) longest = Math.max(longest, msg.decays[i]);
-    v.lifeRemaining = Math.round((longest * 1.5 + 0.05) * sampleRate);
+    const naturalLife = Math.round((sustainSeconds + longest * 1.5 + 0.05) * sampleRate);
+    v.lifeRemaining = v.env.active ? Math.min(naturalLife, v.env.totalFrames) : naturalLife;
 
     // No ramps? Lock the coefficients in once and take the fast path forever.
     this.#updateCoefficients(v, v.glideTotal > 0 ? msg.f0From : msg.f0To);
@@ -171,6 +370,9 @@ class ModalProcessor extends AudioWorkletProcessor {
 
   /** Recompute a1/a2/norm for every mode at fundamental `f0`. */
   #updateCoefficients(v, f0) {
+    // Remembered so the release can rebuild the same coefficients at a new radius
+    // without having to work out where a glide had got to -- see #releaseModes.
+    v.f0Current = f0;
     const scale = (TWO_PI * f0) / sampleRate;
     for (let i = 0; i < v.count; i += 1) {
       const w = scale * v.ratios[i];
@@ -197,6 +399,22 @@ class ModalProcessor extends AudioWorkletProcessor {
       // damping silently rewrite the spectrum the model asked for.
       v.norm[i] = sinw;
     }
+  }
+
+  /**
+   * Hand the modes back their own decay, now that the envelope has stopped holding
+   * the note open.
+   *
+   * Only the pole radius changes: the ring state (`y1`/`y2`) is left exactly as it
+   * is, so the note carries on from the amplitude and phase it was holding at and
+   * simply begins to fade. Nothing here touches the frequency, so a glide in flight
+   * is unaffected -- the coefficients are rebuilt at whatever fundamental the last
+   * update used.
+   */
+  #releaseModes(v) {
+    v.sustaining = false;
+    for (let i = 0; i < v.count; i += 1) v.r[i] = v.rDecay[i];
+    this.#updateCoefficients(v, v.f0Current);
   }
 
   /**
@@ -253,6 +471,14 @@ class ModalProcessor extends AudioWorkletProcessor {
       const gliding = v.glideTotal > 0 && v.glideDone < v.glideTotal;
       const chunk = Math.min(SUB_BLOCK, end - i, gliding ? Math.max(1, v.glideTotal - v.glideDone) : Infinity);
 
+      // Checked per chunk rather than per sample: the same control rate every other
+      // coefficient change here runs at, so the switch lands within 32 samples of the
+      // envelope's own transition -- under a millisecond, and the level is continuous
+      // across it either way, since only the rate of decay changes.
+      if (v.sustaining && v.env.stage >= ENV_DECAY) {
+        this.#releaseModes(v);
+      }
+
       if (gliding) {
         this.#advanceGlide(v);
       }
@@ -283,6 +509,12 @@ class ModalProcessor extends AudioWorkletProcessor {
           y1[m] = y;
           sum += y * gain[m];
         }
+
+        // The envelope is the last thing applied, so the peak below tracks what is
+        // actually audible -- a voice already faded out is then the right one for
+        // #allocateVoice to steal, which it would not be if peak followed the modes'
+        // raw ring underneath a closed envelope.
+        sum *= envelopeSample(v.env);
 
         out[i] += sum;
         const mag = sum < 0 ? -sum : sum;

@@ -69,28 +69,31 @@ export const INFO_TEXT = {
   lfoAmount: 'LFO Amount — how far it sweeps the parameter, either side of where you set it.',
   lfoTarget: 'LFO Target — which parameter the LFO moves. Set it with Map.',
 
+  // ---- Envelope: one amplitude shape, shared by every instrument -----------
+  envAttack: 'Attack — time to ramp up to full volume. An attack longer than the step cuts short and decays from there.',
+  envHold: 'Hold — time at full volume after the attack. Ends at the step boundary if attack plus hold runs past it. String only.',
+  envDecay: 'Decay — time to fade to silence, free to bleed across the steps that follow. Also sets how long the string rings.',
+  envCurve: 'Envelope Curve — whether the attack and decay are linear or exponential.',
+
   // ---- Modal string voice -------------------------------------------------
   modBias: 'Pluck Position — where along the string it is plucked. Low is dead centre, high is near the bridge.',
   modSpread: 'Pluck Position Spread — how much that plucking point moves note to note.',
   modes: 'Modes — how many vibrating modes the string is built from. More is brighter and costlier.',
   stiffness: 'Stiffness — string inharmonicity. Higher stretches the overtones sharp, like a thick steel string.',
-  decay: 'Decay — how long the string rings after it is plucked.',
   damping: 'Damping — how much faster the high modes fade than the low ones. Higher is duller.',
   pluckSoftness: 'Pluck Softness — a hard pick excites the high modes, a soft one leaves them out.',
 
   // ---- Percussion ---------------------------------------------------------
-  // Every colour is a tilt: low is dark, high is bright, halfway is flat.
-  kickDecay: 'Kick Decay — how long the drum rings after the beater hits it.',
+  // Every colour is a tilt: low is dark, high is bright, halfway is flat. How long
+  // any of the three rings is the Envelope group's Decay, not a knob of its own.
   kickSweep: 'Kick Sweep Amount — how far above its tuning the pitch starts before falling to it.',
   kickSweepTime: 'Kick Sweep Time — how fast that pitch drop happens. Short is a click, long is a boom.',
   kickNoise: 'Kick Noise Amount — a burst of noise on the attack, for the sound of the beater itself.',
   kickNoiseColor: 'Kick Noise Colour — tilts that attack noise from dark to bright.',
-  snareDecay: 'Snare Decay — how long the wires rattle after the hit.',
   snareNoise: 'Snare Noise Amount — level of the wire rattle, the half that makes it a snare.',
   snareNoiseColor: 'Snare Noise Colour — tilts the rattle from dark to bright.',
   snareTone: 'Snare Body Amount — level of the tuned shell under the rattle.',
   snareBodyDecay: 'Snare Body Decay — how long that shell rings. Shorter reads as a tighter drum.',
-  hatDecay: 'Hat Decay — how long the cymbal rings. Short is closed, longer is open.',
   hatNoise: 'Hat Noise Amount — blends the cymbal between a metallic oscillator cluster (low) and pure shaped noise (high).',
   hatNoiseColor: 'Hat Noise Colour — tilts the cymbal from dark to bright.',
 
@@ -117,6 +120,8 @@ export const INFO_TEXT = {
   // The LFO's scope, its assign button, and its clear button: a picture, a mode,
   // and an action -- none of them a param.
   lfoScope: 'LFO Scope — one cycle of the current shape, after folding.',
+  // The envelope's canvas: a picture, like the LFO's, with no param of its own.
+  envScope: 'Envelope — one note\'s shape. The line along the top marks how much of it fits inside one step.',
   lfoMap: 'Map — press, then click any highlighted control to point the LFO at it. Escape cancels.',
   lfoClear: 'Clear — unmaps the LFO from whatever it is currently pointed at.',
   // A track tab. The mute dot, level and swing numbers inside it carry their own

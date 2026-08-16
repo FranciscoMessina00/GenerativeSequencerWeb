@@ -1310,6 +1310,110 @@ input[type="range"]::-moz-range-thumb {
 .trig-loop .dragnum__value { font-size: 17px; line-height: 24px; }
 .trig-loop .dragnum__label { line-height: 13px; }
 
+/* ---- envelope: the amplitude display plus its three times ---- */
+
+/* It sits inside whichever instrument panel is showing rather than in a section of
+   its own, directly under that panel's heading -- so it needs the gap below that a
+   .control-row would have given it. */
+.envelope {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+/* Fixed height, and a width that does not follow the tempo -- the same argument
+   .lfo__scope makes, plus one of its own: what the panel is for is comparing the
+   envelope against the step marker, and a frame that resized with either would leave
+   every reading relative to a ruler that had also moved. */
+.envelope__scope {
+  height: 68px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* display:block matters: an inline canvas picks up baseline whitespace and then its
+   measured rect never matches the box it is supposed to fill. */
+.envelope__canvas { display: block; width: 100%; height: 100%; }
+
+/* A fourth cell in the row, not an icon floating on the display: the four things this
+   panel holds are one set. It borrows .dragnum's stack -- the thing that changes above,
+   what it is called below -- so the captions line up across all four. A <button>
+   rather than a drag-number because it has two states and no magnitude. */
+.envelope__curve {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s;
+}
+.envelope__curve:hover,
+.envelope__curve:focus-visible {
+  background: var(--accent-09);
+  border-color: var(--accent-28);
+  outline: none;
+}
+
+/* Fixed height, matching the line box of the 14px values beside it, so the four
+   captions sit on one line however tall the glyph itself is drawn. */
+.envelope__curve-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 16px;
+  color: var(--text);
+  transition: color 0.12s;
+}
+/* The glyph is what the press changes, so that is what lights up -- the same division
+   .dragnum makes between its value and its label. */
+.envelope__curve:hover .envelope__curve-glyph,
+.envelope__curve:focus-visible .envelope__curve-glyph { color: var(--accent); }
+
+.envelope__curve-label {
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: color 0.12s;
+}
+.envelope__curve:hover .envelope__curve-label,
+.envelope__curve:focus-visible .envelope__curve-label { color: var(--text); }
+
+.envelope__curve-icon { width: 16px; height: 16px; }
+.envelope__curve-icon line,
+.envelope__curve-icon path {
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  fill: none;
+}
+
+/* space-around rather than a four-column grid: Hold is hidden on every instrument but
+   the string, and a grid would leave its empty column behind -- the remaining three
+   would sit off to one side instead of staying centred and evenly spaced. */
+.envelope__row {
+  display: flex;
+  justify-content: space-around;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* [hidden] needs a rule of its own here for the same reason .lfo does: .dragnum sets
+   its own display, which outranks the UA stylesheet's display:none. */
+.envelope [hidden] { display: none; }
+
+.envelope__row .dragnum--compact { padding: 4px 8px; }
+.envelope__row .dragnum--compact .dragnum__value { font-size: 14px; }
+.envelope__row .dragnum--compact .dragnum__label { font-size: 8px; }
+
 /* ---- lfo: waveform scope plus its controls ---- */
 
 .lfo {

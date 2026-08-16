@@ -161,7 +161,7 @@ for (const instrument of PERCUSSION) {
 
 log('-- the kick sweeps onto the note it was given --');
 {
-  const low = await render(INSTRUMENTS[1], { step: { note: 36 }, params: { kickSweep: 4, kickDecay: 1 } });
+  const low = await render(INSTRUMENTS[1], { step: { note: 36 }, params: { kickSweep: 4, envDecay: 1000 } });
   // 36 is ~65 Hz. By the tail the sweep has settled, so the energy should be there and
   // not at the four-times-higher pitch it started from.
   const from = frame(0.25);
@@ -178,12 +178,17 @@ log('-- the kick sweeps onto the note it was given --');
   check('the attack is above the note', early > earlyLow * 0.5, 'true');
 }
 
-log('\n-- the hi-hat is brief and bright, the snare longer --');
+log('\n-- the hi-hat is as long as the envelope says, and bright --');
 {
-  const hat = await render(INSTRUMENTS[3]);
-  const snare = await render(INSTRUMENTS[2]);
-  const tail = frame(0.2);
-  check('the hat has faded by 200 ms', stats(hat, tail).rms < stats(snare, tail).rms, 'true');
+  // How long a hit lasts is the shared envelope's now, so a hat and a snare on the
+  // same settings are the same length -- the hat is no longer intrinsically the
+  // briefer of the two. What is worth checking instead is that the one dial does
+  // reach this voice: a short envelope has to leave it quiet where a long one does not.
+  const brief = await render(INSTRUMENTS[3], { params: { envDecay: 60 } });
+  const long = await render(INSTRUMENTS[3], { params: { envDecay: 500 } });
+  const tail = frame(START + 0.2);
+  check('a short envelope has faded by 200 ms', stats(brief, tail).rms < 0.001, 'true');
+  check('...and a long one has not', stats(long, tail).rms > stats(brief, tail).rms * 10, 'true');
   // Colour is a tilt, so it must move energy up and down the band without changing how
   // loud the hit is -- that is the whole reason it is a crossfade and not a cutoff.
   const dark = await render(INSTRUMENTS[3], { params: { hatNoiseColor: 0 } });
@@ -215,12 +220,16 @@ log('\n-- the hi-hat oscillator cluster has real tonal content --');
   // comparing a tone against an off-partial frequency on ONE deterministic render is
   // exact, where comparing against a single noisy render's energy at that same bin is
   // a high-variance measurement of almost nothing.
-  const oscOnly = await render(INSTRUMENTS[3], { params: { hatNoise: 0 } });
+  // Note 60 explicitly, not the default 48 this page hits everything else with: the
+  // two frequencies below are derived from it, and reading them off a note the render
+  // was not given made this a measurement of leakage between partials rather than of
+  // the partial itself.
+  const oscOnly = await render(INSTRUMENTS[3], { step: { note: 60 }, params: { hatNoise: 0 } });
   const from = frame(START);
   const to = frame(START + 0.02);
-  // Default note 60 -> oscHz[0] = midiToHz(60) * 4 ~= 1046.5 Hz, the cluster's
-  // fundamental; ~1182 Hz sits between the first two partials (ratios 1 and 1.25) and
-  // is not one of the six.
+  // note 60 -> oscHz[0] = midiToHz(60) * 4 ~= 1046.5 Hz, the cluster's fundamental;
+  // ~1182 Hz sits between the first two partials (ratios 1 and 1.25) and is not one
+  // of the six.
   const fundamental = 1046.5;
   const offPartial = 1182;
   const atFundamental = goertzel(oscOnly, fundamental, from, to);
@@ -271,6 +280,45 @@ log('\n-- the string still plays, having moved to the registry --');
   check('it makes a sound', after.peak > 0.01, 'true');
   check('silent before its start time', stats(data, 0, frame(START) - 2).peak, 0);
   log(`     peak ${after.peak.toFixed(4)}`);
+}
+
+log('\n-- the string actually holds, then releases --');
+{
+  // The bug this guards: a plucked string cannot physically be sustained, so the
+  // modes used to decay at their own rate underneath a gain sitting at full level and
+  // the note was over long before the hold was. The resonators are frozen for the
+  // duration of attack + hold now, and hand themselves back their own decay at the
+  // release -- see SUSTAIN_T60 in modal-processor.js.
+  //
+  // A step long enough that the hold is not clamped to it, and a decay short enough
+  // that the release is unmistakable against the hold.
+  const held = await render(INSTRUMENTS[0], {
+    seconds: 1.4,
+    step: { stepDuration: 2 },
+    params: { envAttack: 10, envHold: 800, envDecay: 120 },
+  });
+
+  // Three windows: just after the attack, near the end of the hold, and past the
+  // point the release must have finished.
+  const early = stats(held, frame(START + 0.05), frame(START + 0.15));
+  const late = stats(held, frame(START + 0.7), frame(START + 0.8));
+  const gone = stats(held, frame(START + 0.95), held.length);
+
+  check('it is still sounding at the end of an 800 ms hold', late.rms > early.rms * 0.5, 'true');
+  check('...and it has not grown either', late.rms < early.rms * 1.5, 'true');
+  check('the release silences it', gone.rms < early.rms * 0.02, 'true');
+  log(`     rms: after attack ${early.rms.toFixed(4)}  end of hold ${late.rms.toFixed(4)}  after release ${gone.rms.toFixed(4)}`);
+
+  // And the other half of the contract: with no hold at all, nothing is frozen and the
+  // string decays from the moment it is plucked, exactly as it always did.
+  const plucked = await render(INSTRUMENTS[0], {
+    seconds: 1.4,
+    step: { stepDuration: 2 },
+    params: { envAttack: 0, envHold: 0, envDecay: 120 },
+  });
+  const pluckEarly = stats(plucked, frame(START), frame(START + 0.05));
+  const pluckLate = stats(plucked, frame(START + 0.3), frame(START + 0.4));
+  check('an unheld pluck decays on its own', pluckLate.rms < pluckEarly.rms * 0.1, 'true');
 }
 
 log(failures === 0 ? '\nALL CHECKS DONE' : `\n${failures} FAILED`);

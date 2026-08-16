@@ -173,9 +173,9 @@ test('a voice param is routed with the trackId that owns it', () => {
   // track 1's chain.
   const { store, written } = harness({ trackCount: 4 });
   written.length = 0;
-  store.set('decay', 2, 3);
+  store.set('envDecay', 2000, 3);
 
-  assert.deepEqual(written, [{ key: 'decay', value: 2, trackId: 3, target: 'voice' }]);
+  assert.deepEqual(written, [{ key: 'envDecay', value: 2000, trackId: 3, target: 'voice' }]);
 });
 
 test('every track starts muted, so four of them cannot stack up on load', () => {
@@ -248,7 +248,7 @@ test('an unmapped track\'s LFO writes nothing at all', () => {
   const { modulations, written } = lfoHarness(h);
   // Amount without a target, and a target without amount: neither is a mapping.
   h.store.set('lfoAmount', 1, 0);
-  h.store.set('lfoTarget', MOD_TARGETS.indexOf('decay'), 1);
+  h.store.set('lfoTarget', MOD_TARGETS.indexOf('envDecay'), 1);
 
   written.length = 0;
   for (const m of modulations) m.onStep({ audioTime: 0, stepDuration: 0.125 });
@@ -283,7 +283,7 @@ test('stopping releases every track\'s target, not just the visible one', () => 
   const h = harness({ trackCount: 4 });
   const { modulations, written } = lfoHarness(h);
   for (const t of [0, 1, 2, 3]) {
-    h.store.set('lfoTarget', MOD_TARGETS.indexOf('decay'), t);
+    h.store.set('lfoTarget', MOD_TARGETS.indexOf('envDecay'), t);
     h.store.set('lfoAmount', 1, t);
     modulations[t].onStep({ audioTime: 0.1, stepDuration: 0.125 });
   }
@@ -294,6 +294,6 @@ test('stopping releases every track\'s target, not just the visible one', () => 
   assert.equal(written.length, 4, 'all four must hand their param back');
   assert.deepEqual([...new Set(written.map((w) => w.trackId))].sort(), [0, 1, 2, 3]);
   for (const w of written) {
-    assert.equal(w.value, paramSpec('decay').def, 'restored to the stored base value');
+    assert.equal(w.value, paramSpec('envDecay').def, 'restored to the stored base value');
   }
 });

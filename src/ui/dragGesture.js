@@ -19,11 +19,61 @@ export const FULL_RANGE_PX = 180;
 /** How much finer a shift-held drag reads the same travel. */
 export const FINE_DIVISOR = 8;
 
+/**
+ * How hard a `curve: 'exp'` param's drag is bent toward its low end.
+ *
+ * 3 was chosen by what it does at the two ends rather than as a round number: the
+ * halfway point of the travel lands at 18% of the range, the bottom of the drag reads
+ * about 6x finer than a linear one, and the top about 3x coarser. Higher starts to
+ * make the upper half feel like it is running away; lower stops being worth the
+ * departure from a plain linear drag.
+ */
+export const EXP_DRAG_K = 3;
+
+function clamp01(value) {
+  return Math.min(1, Math.max(0, value));
+}
+
 /** Raw value implied by a vertical drag delta from a start value, shift-fine-halved. */
 export function dragDeltaValue(startValue, dy, range, shiftKey) {
   let perPx = range / FULL_RANGE_PX;
   if (shiftKey) perPx /= FINE_DIVISOR;
   return startValue + dy * perPx;
+}
+
+/**
+ * The same gesture, warped so the low end of the range gets more of the travel.
+ *
+ * For a param whose useful settings are bunched near its minimum -- the envelope
+ * times, where 5 ms and 40 ms are different sounds but 3.2 s and 3.5 s are the same
+ * one -- a linear drag spends most of its 180 px where nothing is being decided.
+ *
+ * The drag moves a *position* `u` linearly across 0..1, and the value is
+ * `min + span * (e^(k·u) − 1) / (e^k − 1)`. One full sweep still covers the whole
+ * range, so the gesture's shape is unchanged; only where its resolution sits moves.
+ * `u` is recovered from `startValue` on every move rather than carried, so the
+ * mapping is a pure function of where the drag began and how far it has travelled.
+ *
+ * Unlike the linear version this clamps at both ends instead of letting the value
+ * run past them for `quantize` to catch later -- overshooting an exponential would
+ * mean exponentiating the overshoot. The practical difference is an improvement:
+ * dragging past the top and back down responds immediately rather than after
+ * retracing however far it went.
+ */
+export function expDragDeltaValue(startValue, dy, min, max, shiftKey) {
+  const span = max - min;
+  if (!(span > 0)) return startValue;
+
+  const t = clamp01((startValue - min) / span);
+  // expm1/log1p rather than exp/log: both arguments are small near the bottom of the
+  // range, which is exactly where this curve exists to give resolution.
+  const u = Math.log1p(t * Math.expm1(EXP_DRAG_K)) / EXP_DRAG_K;
+
+  let perPx = 1 / FULL_RANGE_PX;
+  if (shiftKey) perPx /= FINE_DIVISOR;
+
+  const next = clamp01(u + dy * perPx);
+  return min + span * (Math.expm1(EXP_DRAG_K * next) / Math.expm1(EXP_DRAG_K));
 }
 
 /**
