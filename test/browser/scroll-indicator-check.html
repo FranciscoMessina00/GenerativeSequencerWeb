@@ -1,9 +1,9 @@
 <!doctype html>
 <!-- Manual check for ScrollIndicator: that it builds its own thumb, writes the two
-     custom properties as plain readable px values, tracks the scroll position, ends
-     flush with the bottom of its track, and hides the thumb when there is nothing to
-     scroll. The geometry itself is covered in Node by test/scrollThumb.test.js --
-     this page is about the DOM wiring around it.
+     custom properties as plain readable px values, tracks the scroll position, keeps
+     a small margin off each end of its track, and hides the thumb when there is
+     nothing to scroll. The geometry itself is covered in Node by
+     test/scrollThumb.test.js -- this page is about the DOM wiring around it.
 
      Driven from an ordinary overflow container rather than the document: the widget
      takes its scroller as a constructor option precisely so a test can pin exact
@@ -29,6 +29,7 @@
 <pre id="log"></pre>
 <script type="module">
 import { ScrollIndicator } from '../../src/ui/ScrollIndicator.js';
+import { THUMB_MARGIN_PX } from '../../src/ui/scrollThumb.js';
 
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; };
 let failures = 0;
@@ -67,7 +68,7 @@ check('thumb is shown, there is scrolling to do', hidden(), false);
 // 400 of 1200 visible -> a third of a 400px track.
 check('height is the visible fraction', px('height'), '133px');
 check('...written as a plain px value, no calc()', /^\d+px$/.test(px('height')), true);
-check('top starts at zero', px('top'), '0px');
+check('top starts a margin down from the track top', px('top'), `${THUMB_MARGIN_PX}px`);
 
 log('\n-- scrolled to the middle --');
 // Full scroll is 1200 - 400 = 800, so 400 is exactly halfway.
@@ -83,13 +84,13 @@ check('still the same height', px('height'), '133px');
 log('\n-- scrolled to the end --');
 scroller.scrollTop = 800;
 indicator.update();
-check('thumb bottom lands on the track bottom', num('top') + num('height'), TRACK);
+check('thumb bottom lands a margin short of the track bottom', num('top') + num('height'), TRACK - THUMB_MARGIN_PX);
 check('moved further down than the midpoint', num('top') > midTop, true);
 
 log('\n-- back to the top --');
 scroller.scrollTop = 0;
 indicator.update();
-check('returns to zero rather than sticking', px('top'), '0px');
+check('returns to the top margin rather than sticking', px('top'), `${THUMB_MARGIN_PX}px`);
 
 log('\n-- a container whose content fits --');
 const fitsStrip = document.getElementById('scrollind-fits');
@@ -112,7 +113,7 @@ scroller.scrollTop = 800;
 scroller.dispatchEvent(new Event('scroll'));
 // The class coalesces through requestAnimationFrame, so wait a frame before reading.
 await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-check('a scroll event moved the thumb on its own', num('top') + num('height'), TRACK);
+check('a scroll event moved the thumb on its own', num('top') + num('height'), TRACK - THUMB_MARGIN_PX);
 
 log('\n-- dragging: the bar scrolls like a scrollbar, not like a pan --');
 // setPointerCapture is parked for the duration, the same way trigger-controls-check
@@ -136,12 +137,13 @@ const drag = (fromY, toY) => {
 
 scroller.scrollTop = 0;
 indicator.update();
-// Grab the thumb at its top and pull down a quarter of the track.
-drag(0, 100);
+// Grab the thumb at its top -- which sits a margin down from the track's own top --
+// and pull down a quarter of the track.
+drag(THUMB_MARGIN_PX, THUMB_MARGIN_PX + 100);
 const draggedDown = scroller.scrollTop;
 check('dragging DOWN scrolls further DOWN the page', draggedDown > 0, true);
-// 100px of a (400 - 133) = 267px travel, over 800px of scrollable content.
-checkNear('...proportionally to the travel', draggedDown, (100 / (TRACK - 133)) * 800, 2);
+// 100px of a (400 - 133 - 2*margin) travel, over 800px of scrollable content.
+checkNear('...proportionally to the travel', draggedDown, (100 / (TRACK - 133 - 2 * THUMB_MARGIN_PX)) * 800, 2);
 
 // ...and back up again.
 indicator.update();
