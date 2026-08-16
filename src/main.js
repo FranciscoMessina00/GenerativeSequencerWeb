@@ -19,6 +19,7 @@ import { LogicOpControl } from './ui/LogicOpControl.js';
 import { FillIconControl } from './ui/FillIconControl.js';
 import { TrigLoopControl } from './ui/TrigLoopControl.js';
 import { LfoPanel } from './ui/LfoPanel.js';
+import { EnvelopePanel } from './ui/EnvelopePanel.js';
 import { TrackTabs } from './ui/TrackTabs.js';
 import { InstrumentPanel } from './ui/InstrumentPanel.js';
 import { INSTRUMENT_GROUPS } from './audio/instruments.js';
@@ -309,6 +310,27 @@ const lfoPanel = new LfoPanel({
 });
 sliderPrepend.Modulation = lfoPanel.element;
 
+// The amplitude envelope, which every instrument is played through. It has no group
+// of its own: it sits inside whichever instrument panel is showing, directly under the
+// selector, because "how long is this note" is a question about the instrument on
+// screen. One panel that moves rather than four that stay put -- InstrumentPanel
+// already does exactly that for the selector, and carries this with it.
+//
+// All four of its keys are skipped below so that adding 'Envelope' to CONTROL_GROUPS
+// later could not quietly draw a second set of them as plain sliders.
+const ENVELOPE_KEYS = ['envAttack', 'envHold', 'envDecay', 'envCurve'];
+const envelopePanel = new EnvelopePanel({
+  bus,
+  trackId: visibleTrack,
+  attackSpec: paramSpec('envAttack'),
+  holdSpec: paramSpec('envHold'),
+  decaySpec: paramSpec('envDecay'),
+  curveSpec: paramSpec('envCurve'),
+  // Read late, not copied: the step length moves with the tempo, the division and the
+  // step modifier, and this panel owns none of the three.
+  getStepSeconds: () => scheduler.stepDurationFor(visibleTrack),
+});
+
 // Group order and membership no longer track PARAM_GROUPS: the order here is the
 // on-screen order, which the schema's own ordering has no reason to dictate.
 //
@@ -318,7 +340,8 @@ sliderPrepend.Modulation = lfoPanel.element;
 //
 // All four instrument groups are rendered, and InstrumentPanel hides every one but the
 // visible track's. They sit together in the middle so that switching instrument moves
-// nothing else on the page.
+// nothing else on the page. Envelope is absent because it has no section of its own --
+// it rides inside whichever instrument panel is showing.
 const CONTROL_GROUPS = [
   'Pitch', 'Velocity', 'Modulation', ...INSTRUMENT_GROUPS, 'Granulator',
 ];
@@ -327,7 +350,10 @@ ui.renderGroups(
   document.getElementById('controls'),
   CONTROL_GROUPS,
   {
-    skip: [...sliderSkipKeys, ...NOTE_LOOP_KEYS, ...VEL_LOOP_KEYS, ...LFO_KEYS, 'scale', 'glideAmount', 'glideMode'],
+    skip: [
+      ...sliderSkipKeys, ...NOTE_LOOP_KEYS, ...VEL_LOOP_KEYS, ...LFO_KEYS,
+      ...ENVELOPE_KEYS, 'scale', 'glideAmount', 'glideMode',
+    ],
     prepend: sliderPrepend,
     headingExtra: { Modulation: lfoPanel.targetRow },
   },
@@ -340,6 +366,8 @@ const instrumentPanel = new InstrumentPanel({
   sections: ui.sections,
   headings: ui.headings,
   onInput: (value) => bus.emit('param:change', { trackId: visibleTrack, key: 'instrument', value }),
+  // Carried into whichever panel is showing, under its heading -- see InstrumentPanel.
+  extra: envelopePanel.element,
 });
 
 // Attaching a hidden readout would still cost a full reformat on every step, so
@@ -399,6 +427,7 @@ registerKeyed(trigLoopControl);
 registerKeyed(noteLoopControl);
 registerKeyed(velLoopControl);
 registerKeyed(lfoPanel);
+registerKeyed(envelopePanel);
 for (const slider of Object.values(biasSpreadSliders)) registerKeyed(slider);
 registerLeaf(scaleDropdown);
 registerLeaf(logicOpControl);
@@ -411,7 +440,7 @@ registerLeaf(instrumentPanel);
 /** Every widget that owns a trackId, so selectTrack can re-point all of them. */
 const trackBoundWidgets = [
   ui, glideControl, stepDivisionControl, trigLoopControl,
-  noteLoopControl, velLoopControl, lfoPanel,
+  noteLoopControl, velLoopControl, lfoPanel, envelopePanel,
   ...Object.values(biasSpreadSliders),
 ];
 
@@ -443,6 +472,13 @@ function selectTrack(next) {
     controlSetters.get(key)?.(value);
   }
 
+  // Two things the envelope panel needs that are not its own parameters: which
+  // instrument this page plays (Hold is the string's alone) and how long a step is.
+  // Both are read here rather than pushed by the store, because neither is a value
+  // the panel owns -- see EnvelopePanel's header.
+  envelopePanel.setInstrument(store.get('instrument', next));
+  envelopePanel.refresh();
+
   const track = tracks[next];
   view.setPattern(track.getPattern());
   view.setLoopActive(track.params.trigLoop);
@@ -468,6 +504,7 @@ function selectTrack(next) {
   const palette = applyPalette(next);
   view.setPalette(palette);
   lfoPanel.view.setPalette(palette);
+  envelopePanel.setPalette(palette);
   tabs?.setActive(next);
 }
 
@@ -482,6 +519,13 @@ bus.on('param:change', ({ trackId, key, value }) => {
 bus.on('param:changed', ({ trackId, key, value, global }) => {
   if (!global && trackId !== visibleTrack) return;
   controlSetters.get(key)?.(value);
+
+  // The envelope display is drawn against the step it would be cut at, and the step
+  // it would be cut at is not one of the envelope's own params. `instrument` already
+  // has an owner in controlSetters (the InstrumentPanel) and the map holds one setter
+  // per key, so the panel is fed from here rather than by registering the key twice.
+  if (key === 'instrument') envelopePanel.setInstrument(value);
+  else if (key === 'bpm' || key === 'stepDivision' || key === 'stepMod') envelopePanel.refresh();
 });
 
 bus.on('step', (step) => {
@@ -707,8 +751,14 @@ playButton.addEventListener('click', async () => {
 // sounds through that track's own chain, so a muted track plucks silently.
 document.getElementById('pluck').addEventListener('click', async () => {
   await ensureAudio();
-  const step = tracks[visibleTrack].step(scheduler.stepDurationFor(visibleTrack));
-  audio.noteOn({ ...step, triggered: true, audioTime: audio.currentTime + 0.02 });
+  const stepDuration = scheduler.stepDurationFor(visibleTrack);
+  const step = tracks[visibleTrack].step(stepDuration);
+  // stepDuration is normally added by Scheduler.pump(), not by Track.step() -- so it
+  // has to be put back here, or a one-off pluck would carry an envelope that was
+  // never truncated against anything.
+  audio.noteOn({
+    ...step, triggered: true, stepDuration, audioTime: audio.currentTime + 0.02,
+  });
   ui.pushStep({ ...step, triggered: true });
 });
 
@@ -871,6 +921,7 @@ bus.on('param:changed', ({ trackId, key, value }) => {
 const bootPalette = applyPalette(visibleTrack);
 view.setPalette(bootPalette);
 lfoPanel.view.setPalette(bootPalette);
+envelopePanel.setPalette(bootPalette);
 
 // The defaults that differ between tracks -- see core/bootDefaults.js. Applied after
 // the strip and the panels exist, since they announce like any other committed value

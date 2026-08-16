@@ -3,7 +3,7 @@ import { instrumentById } from '../audio/instruments.js';
 import { SCALE_NAMES } from '../sequencer/scales.js';
 import { noteValueLabel, stepModById } from '../sequencer/stepDivision.js';
 import { DragNumber } from './DragNumber.js';
-import { formatNumber } from './numberUtils.js';
+import { formatMilliseconds, formatNumber } from './numberUtils.js';
 
 /**
  * Builds the control surface from the param schema and publishes changes to the
@@ -43,6 +43,7 @@ export class UIController {
     if (spec.display === 'instrument') return instrumentById(value).name;
     if (spec.display === 'noteValue') return noteValueLabel(value);
     if (spec.display === 'stepMod') return stepModById(value).name;
+    if (spec.display === 'ms') return formatMilliseconds(value);
     if (spec.type === 'toggle') return value ? 'on' : 'off';
     return formatNumber(Number(value), spec.step);
   }

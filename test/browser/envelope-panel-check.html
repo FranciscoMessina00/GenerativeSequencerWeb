@@ -1,0 +1,184 @@
+<!doctype html>
+<!-- Checks the envelope panel in a real browser, which is where the two things it
+     cannot be tested for in Node actually happen: the canvas gets a backing store only
+     once a ResizeObserver has seen the panel laid out, and Hold is shown or hidden by
+     a CSS rule that has to outrank .dragnum's own display.
+
+     The maths behind the picture is test/envelope.test.js's and
+     test/envelopeShape.test.js's; nothing here re-checks a curve. What is checked here
+     is that the panel is wired to them -- that the marker moves when the tempo does,
+     and that the drawn shape follows the instrument's own rules rather than the
+     control's visibility alone. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>
+  body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+  /* The panel is normally a child of a .group inside the controls grid, which is what
+     gives it a width. Standing alone here it needs one. */
+  #mount{width:280px;}
+</style>
+</head>
+<body>
+<div id="mount"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { paramSpec } from '../../src/core/paramSchema.js';
+import { EnvelopePanel } from '../../src/ui/EnvelopePanel.js';
+import { envelopeShape } from '../../src/ui/envelopeShape.js';
+import { paletteFor } from '../../src/ui/palette.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const bus = new EventBus();
+const events = [];
+bus.on('param:change', (e) => events.push(e));
+
+/** 120 BPM at 1/16 to start with, so a step is 125 ms. */
+let stepSeconds = 0.125;
+
+const panel = new EnvelopePanel({
+  bus,
+  trackId: 0,
+  attackSpec: paramSpec('envAttack'),
+  holdSpec: paramSpec('envHold'),
+  decaySpec: paramSpec('envDecay'),
+  curveSpec: paramSpec('envCurve'),
+  getStepSeconds: () => stepSeconds,
+});
+document.getElementById('mount').appendChild(panel.element);
+
+/** One frame, so the ResizeObserver has fired and the canvas has been measured. */
+const settle = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+await settle();
+
+// ---------------------------------------------------------------------------
+// The canvas
+// ---------------------------------------------------------------------------
+
+const canvas = panel.element.querySelector('.envelope__canvas');
+check('the canvas has a real backing store', canvas.width > 0 && canvas.height > 0, true);
+check('the backing store follows the device pixel ratio',
+  canvas.width, Math.max(1, Math.round(canvas.getBoundingClientRect().width * (window.devicePixelRatio || 1))));
+check('the view measured the same box the canvas occupies',
+  Math.round(panel.view.cssWidth), Math.round(canvas.getBoundingClientRect().width));
+
+// Something was actually painted: a fully transparent canvas would mean the draw ran
+// against a zero-sized box and bailed.
+const ctx = canvas.getContext('2d');
+const painted = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+let opaque = 0;
+for (let i = 3; i < painted.length; i += 4) if (painted[i] > 0) opaque += 1;
+check('the curve was drawn, not just cleared', opaque > 0, true);
+
+// ---------------------------------------------------------------------------
+// Hold belongs to the string alone
+// ---------------------------------------------------------------------------
+
+const holdEl = panel.holdControl.element;
+const shown = () => getComputedStyle(holdEl).display !== 'none';
+
+check('hold is visible for the modal string', shown(), true);
+
+panel.setInstrument(1); // kick
+check('hold is hidden for the kick', shown(), false);
+panel.setInstrument(2);
+check('hold is hidden for the snare', shown(), false);
+panel.setInstrument(3);
+check('hold is hidden for the hi-hat', shown(), false);
+panel.setInstrument(0);
+check('hold comes back for the string', shown(), true);
+
+// Hiding it is not enough: the drawn curve has to drop the stage too, or the panel
+// would show a note the track cannot play. The envelope's own duration is the tell.
+panel.setValue('envAttack', 10);
+panel.setValue('envHold', 500);
+panel.setValue('envDecay', 200);
+panel.setInstrument(0);
+const withHold = panel.view.env;
+panel.setInstrument(1);
+const withoutHold = panel.view.env;
+check('the string holds to the step boundary', Math.abs(withHold.hold - (0.125 - 0.01)) < 1e-9, true);
+check('the kick has no hold stage at all', withoutHold.hold, 0);
+panel.setInstrument(0);
+
+// ---------------------------------------------------------------------------
+// The step marker follows the transport
+// ---------------------------------------------------------------------------
+
+const markerX = () => envelopeShape({
+  env: panel.view.env,
+  stepSeconds: panel.view.stepSeconds,
+  width: panel.view.cssWidth,
+  height: panel.view.cssHeight,
+}).stepMarkerX;
+
+const at120 = markerX();
+stepSeconds = 0.0625; // twice the tempo, half the step
+panel.refresh();
+const at240 = markerX();
+check('a shorter step pulls the marker back', at240 < at120, true);
+
+// A hold short enough to finish on its own, so lengthening the step no longer
+// lengthens the envelope with it -- otherwise hold simply expands to the new boundary
+// and the envelope stays the longer of the two however long the step gets.
+panel.setValue('envHold', 60);
+stepSeconds = 0.5;
+panel.refresh();
+check('an envelope that finishes inside its step puts the marker at the far edge',
+  Math.round(markerX()), Math.round(panel.view.cssWidth));
+stepSeconds = 0.125;
+panel.setValue('envHold', 500);
+panel.refresh();
+
+// ---------------------------------------------------------------------------
+// The controls emit, and reflect without echoing
+// ---------------------------------------------------------------------------
+
+events.length = 0;
+panel.curveButton.click();
+check('the curve toggle emits its key', events.at(-1).key, 'envCurve');
+check('the curve toggle emits the flipped value', events.at(-1).value, false);
+check('the icon follows the mode',
+  panel.curveButton.querySelector('line') ? 'linear' : 'exponential', 'linear');
+panel.curveButton.click();
+check('and back again',
+  panel.curveButton.querySelector('line') ? 'linear' : 'exponential', 'exponential');
+
+events.length = 0;
+panel.setValue('envAttack', 250);
+check('setValue does not echo onto the bus', events.length, 0);
+check('setValue moves the readout', panel.attackControl.valueEl.textContent, '250ms');
+panel.setValue('envDecay', 1500);
+check('a value over a second reads in seconds', panel.decayControl.valueEl.textContent, '1.50s');
+
+// A 250 ms attack cannot fit a 125 ms step, so this is rule 1 -- and the panel must be
+// drawing the truncated shape, not the requested one.
+check('the drawn attack is cut at the step boundary', panel.view.env.attack, 0.125);
+check('and it never reaches full level', panel.view.env.peak < 1, true);
+
+// ---------------------------------------------------------------------------
+// Track-bound, like every other composite
+// ---------------------------------------------------------------------------
+
+panel.setTrackId(2);
+events.length = 0;
+panel.curveButton.click();
+check('gestures are addressed to the current track', events.at(-1).trackId, 2);
+
+panel.setPalette(paletteFor(2));
+check('a palette change repaints without throwing', true, true);
+
+log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : `${failures} FAILED`}`);
+document.title = failures === 0 ? 'envelope-panel-check-done' : 'envelope-panel-check-failed';
+</script>
+</body>
+</html>

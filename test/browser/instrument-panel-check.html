@@ -38,12 +38,19 @@ bus.on('param:change', (e) => events.push(e));
 const ui = new UIController({ bus });
 ui.renderGroups(document.getElementById('controls'), INSTRUMENT_GROUPS);
 
+// A stand-in for the envelope panel main.js carries in here: what is under test is the
+// relocation, not the widget, so a bare div says it without dragging a canvas and a
+// ResizeObserver into a check about `hidden` and computed display.
+const extra = document.createElement('div');
+extra.className = 'envelope';
+
 const picks = [];
 const panel = new InstrumentPanel({
   spec: paramSpec('instrument'),
   sections: ui.sections,
   headings: ui.headings,
   onInput: (value) => picks.push(value),
+  extra,
 });
 
 /** Asserted on computed display, not on the attribute: the point is being off screen. */
@@ -69,7 +76,7 @@ check('the selector reads the default', panel.dropdown.selectEl.value, String(pa
 check('every instrument is offered', panel.dropdown.selectEl.options.length, INSTRUMENTS.length);
 check('by name, not by number', panel.dropdown.selectEl.options[1].textContent, INSTRUMENTS[1].name);
 
-log('\n-- switching moves both the panel and the selector --');
+log('\n-- switching moves the panel, the selector and the envelope --');
 for (const instrument of INSTRUMENTS) {
   panel.setInstrument(instrument.id);
   check(`${instrument.name}: only its panel shows`, visibleGroups().join(','), instrument.group);
@@ -77,7 +84,23 @@ for (const instrument of INSTRUMENTS) {
   // One selector, always -- the mechanism is a moved node, not four hidden copies.
   check(`${instrument.name}: still exactly one selector`,
     document.querySelectorAll('.instrument-pick').length, 1);
+  // Same for the envelope: one node that travels, so the three parameters behind it
+  // can never be driven by two controls at once.
+  check(`${instrument.name}: the envelope came with it`,
+    extra.closest('.group'), ui.sections.get(instrument.group));
+  check(`${instrument.name}: still exactly one envelope`,
+    document.querySelectorAll('.envelope').length, 1);
 }
+
+log('\n-- the envelope sits directly under the heading --');
+panel.setInstrument(0);
+const section = ui.sections.get(INSTRUMENTS[0].group);
+check('it is the first thing after the h2', section.children[1], extra);
+// Above the instrument's own controls, not after them: it describes the note the
+// instrument plays, so it reads before the details of how that instrument sounds.
+check('...and every control comes after it',
+  [...section.querySelectorAll('.control')].every((c) => extra.compareDocumentPosition(c)
+    & Node.DOCUMENT_POSITION_FOLLOWING), true);
 
 log('\n-- the caption is suppressed, since the heading already says it --');
 panel.setInstrument(1);

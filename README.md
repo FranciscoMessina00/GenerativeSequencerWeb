@@ -82,11 +82,15 @@ step becomes a note-on**. That last field is what makes the rest polymorphic —
 entry and a processor rather than editing a switch in three places. Like
 `MOD_TARGETS`, the array index is the stored value, so it is append-only.
 
-Parameters are namespaced per instrument (`kickDecay`, `snareDecay`, `hatDecay`)
-rather than shared. One schema row cannot hold two ranges: a string rings for
-0.25–3 s and a hi-hat's decay tops out below a snare's floor. Namespacing also means
-a track's bag keeps every instrument's settings, so switching voice and back loses
-nothing.
+Timbre parameters are namespaced per instrument (`kickSweep`, `snareBodyDecay`,
+`hatNoiseColor`) rather than shared, because one schema row cannot hold two ranges.
+Namespacing also means a track's bag keeps every instrument's settings, so switching
+voice and back loses nothing.
+
+**How long a note lasts is not namespaced.** Every instrument is played through one
+amplitude envelope — attack, hold, decay, all in absolute milliseconds — so a track
+has a single answer to "how long is this note" whatever it is playing. See
+[Envelope](#envelope) below.
 
 Every `*NoiseColor` is a **tilt**, not a cutoff — 0 dark, 1 bright, 0.5 flat — so the
 knob changes timbre rather than volume. That needed care: the two halves of a one-pole
@@ -104,6 +108,41 @@ rest hidden, rather than rebuilt on each switch: `UIController` holds live refer
 to every control it built, so tearing panels down would invalidate them and take the
 LFO's sweep indicators with them. The selector is one dropdown that *moves* onto the
 visible heading, because there is only one thing being chosen.
+
+## Envelope
+
+One AHD amplitude envelope shapes every instrument — **A**ttack (0–2000 ms),
+**H**old (0–1000 ms), **D**ecay (1–4000 ms), each an absolute duration rather than a
+fraction of a step, so a 30 ms attack is a 30 ms attack at any tempo. The maths is
+[`src/audio/envelope.js`](src/audio/envelope.js), pure and testable; the worklets run
+the same shape as a per-sample recursion.
+
+All three drag on an exponential curve rather than a linear one — 5 ms and 40 ms are
+different sounds where 3.2 s and 3.5 s are the same one, so the travel is bunched
+where the decisions are. Half the drag covers the first fifth of the range.
+
+The step it lands on is what cuts it:
+
+| | |
+|---|---|
+| **A ≥ step** | the attack is cut at the boundary, reaching *less* than full level; hold is skipped and the decay starts from there |
+| **A + H < step** | the attack completes, hold finishes early, and the decay begins inside the step |
+| **A + H ≥ step** | hold is clamped so the decay starts exactly on the boundary |
+| always | the decay runs its full length and is free to bleed into the steps that follow |
+
+The panel draws exactly the envelope a note-on would carry, truncation included,
+with a **Step Length** rule along the top edge — so whether the note releases before
+the boundary, on it, or after it is readable at a glance.
+
+Two things about it are worth knowing:
+
+- **Hold is the modal string's alone.** The three percussion voices get attack and
+  decay only, and the control is hidden on their panels. A drum gated open for a
+  whole step is a sustained tone, not a hit.
+- **Decay is the string's ring too.** The string is the one instrument whose decay
+  is physics rather than a gain ramp, so `envDecay` also sets `modeDecays`'
+  `decayScale` — one dial, in the two places a struck string's length actually
+  lives. Damping, stiffness and velocity go on shaping it exactly as before.
 
 ## Tracks
 
@@ -430,7 +469,9 @@ so `m = 2` is a dead-centre pluck that nulls every even mode, and larger `m`
 moves toward the bridge and brightens the spectrum.
 
 Per-mode decay is `T60[n] = base · n^(−damping)`, giving the bright attack and
-darker tail of a real string; `damping = 0` makes all modes decay together.
+darker tail of a real string; `damping = 0` makes all modes decay together. `base`
+comes from the note's velocity and from `envDecay` — see [Envelope](#envelope), which
+is why the string has one length dial rather than two.
 
 ## Structure
 

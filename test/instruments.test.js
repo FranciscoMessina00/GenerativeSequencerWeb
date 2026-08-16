@@ -127,7 +127,7 @@ test('the string builder still sends exactly what it always did', () => {
   // pins the message contract the modal processor reads.
   const message = INSTRUMENTS[0].buildMessage(STEP, VOICE, SAMPLE_RATE);
   assert.deepEqual(Object.keys(message).sort(), [
-    'count', 'decays', 'f0From', 'f0To', 'gainsFrom', 'gainsTo',
+    'count', 'decays', 'env', 'f0From', 'f0To', 'gainsFrom', 'gainsTo',
     'glideExponential', 'glideTime', 'mFrom', 'mTo', 'modExponential', 'modTime',
     'pluckSoftness', 'ratios', 'startTime', 'type', 'velocity',
   ]);

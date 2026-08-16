@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Runs the 10 `test/browser/*-check.html` pages for real, in headless Chromium,
+ * Runs the 11 `test/browser/*-check.html` pages for real, in headless Chromium,
  * and fails the process if any of them doesn't finish cleanly.
  *
  * Each page is fully self-contained (its own inline `<script type="module">`, its
@@ -13,7 +13,7 @@
  * rendering can race the audio thread, so it is documented as unreliable evidence,
  * not a pass/fail gate, and `npm test` is what actually covers that ground.
  *
- * None of the 10 pages wrap their own script in try/catch or set a fallback
+ * None of the 11 pages wrap their own script in try/catch or set a fallback
  * `<title>`, so an uncaught exception mid-script leaves the title at its default
  * (empty) forever -- a plain title-string wait would hang rather than fail. Every
  * wait here therefore has a timeout, and a timeout counts as a failure just like a
@@ -35,6 +35,7 @@ const TIMEOUT_MS = 15000;
  * decision in the script itself rather than an accident of a directory listing.
  */
 const PAGES = [
+  'envelope-panel-check.html',
   'euclid-view-check.html',
   'glide-control-check.html',
   'info-bar-check.html',

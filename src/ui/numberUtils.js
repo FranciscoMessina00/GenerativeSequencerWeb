@@ -18,6 +18,20 @@ export function formatNumber(value, step) {
   return value.toFixed(decimalsFor(step));
 }
 
+/**
+ * A duration in milliseconds, written so it stays short at both ends of a range that
+ * spans five thousand of them: `240ms` below a second, `1.24s` above it.
+ *
+ * Shared rather than local to the envelope panel because UIController renders the
+ * same params as plain sliders on any surface that does not use the panel, and a
+ * readout that disagreed with the one beside it would be worse than either.
+ */
+export function formatMilliseconds(ms) {
+  const value = Number(ms) || 0;
+  if (Math.abs(value) < 1000) return `${Math.round(value)}ms`;
+  return `${(value / 1000).toFixed(2)}s`;
+}
+
 export function clamp(value, lo, hi) {
   return Math.min(hi, Math.max(lo, value));
 }

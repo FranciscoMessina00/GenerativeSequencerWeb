@@ -8,6 +8,12 @@
  *
  * Index 0 is "not mapped", so the LFO ships inert.
  *
+ * A key that is removed from the schema leaves a `null` **hole** rather than being
+ * spliced out, for exactly the same reason: closing the gap would slide every later
+ * entry down one and silently repoint saved patches. A hole reads as "not mapped"
+ * through modTargetKey below, so a patch aiming at a parameter this build no longer
+ * has lands inert instead of on some unrelated control.
+ *
  * What is missing from this list is missing on purpose:
  *
  *   - Enumerated and toggle params (scale, stepDivision, stepMod, logicOp, instrument
@@ -30,8 +36,8 @@ export const MOD_TARGETS = [
   null, // 0 -- not mapped
   'modBias', // 1  pluck position: the most audible target on the string
   'stiffness', // 2  \
-  'decay', // 3   \ latched at note-on; a ringing note is unaffected
-  'damping', // 4   /
+  null, // 3  was 'decay' -- now envDecay, at 28
+  'damping', // 4   > latched at note-on; a ringing note is unaffected
   'pluckSoftness', // 5 /
   'grainPitch', // 6  live AudioParam, already smoothed over 10 ms
   'grainDryWet', // 7  ditto
@@ -45,19 +51,27 @@ export const MOD_TARGETS = [
   // sounding is unaffected, so the LFO shapes the next one rather than bending this
   // one. Only the instrument a track actually plays has its panel on screen, so
   // assign mode can only ever point the LFO at a parameter that does something.
-  'kickDecay', // 13
+  null, // 13  was 'kickDecay' -- now envDecay, at 28
   'kickSweep', // 14
   'kickSweepTime', // 15
   'kickNoise', // 16
   'kickNoiseColor', // 17
-  'snareDecay', // 18
+  null, // 18  was 'snareDecay' -- now envDecay, at 28
   'snareNoise', // 19
   'snareNoiseColor', // 20
   'snareTone', // 21
   'snareBodyDecay', // 22
-  'hatDecay', // 23
+  null, // 23  was 'hatDecay' -- now envDecay, at 28
   'hatNoise', // 24
   'hatNoiseColor', // 25
+
+  // The amplitude envelope, which every instrument is played through. Latched per
+  // hit like the four above it, so sweeping one of these shapes the next note rather
+  // than bending the one already sounding. envCurve is absent on purpose: it is a
+  // toggle, and MOD_TARGETS excludes toggles for the reason given at the top.
+  'envAttack', // 26
+  'envHold', // 27  no effect on a track playing percussion -- see instruments.js
+  'envDecay', // 28
 ];
 
 /** The param key the LFO is pointed at, or null when unmapped. */

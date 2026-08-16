@@ -2,11 +2,15 @@
  * The three percussion voices: kick, snare, hi-hat.
  *
  * One file registering three processors, because all three are built from the same
- * handful of primitives -- a noise source, a resonant colour filter and an exponential
- * envelope -- and the project already keeps a test (test/masterClip.test.js) whose
- * entire job is policing one piece of DSP duplicated between two worklets. Three files
- * would be three copies of the same helpers. Three classes rather than one with a
+ * handful of primitives -- a noise source, a resonant colour filter and the shared AHD
+ * amplitude envelope -- and the project already keeps a test (test/masterClip.test.js)
+ * whose entire job is policing one piece of DSP duplicated between two worklets. Three
+ * files would be three copies of the same helpers. Three classes rather than one with a
  * `kind` flag, so each instrument still reads as itself.
+ *
+ * None of the three carries a decay of its own any more. How long a hit lasts is the
+ * envelope's, one shape for every instrument in the app -- so what is left in each
+ * class below is only what makes that instrument sound like itself.
  *
  * Snare and hi-hat share a resonant bandpass/highpass colour filter (`setColorFilter`,
  * `colorFilteredSample`); the kick keeps the older, cheaper one-pole tilt
@@ -81,7 +85,15 @@ const HAT_FLOOR_HZ = 300;
  */
 const KICK_TRIM = 0.7;
 const SNARE_TRIM = 0.55;
-const HAT_TRIM = 0.8;
+/**
+ * Lowered from 0.8 when the shared envelope replaced the hi-hat's own 80 ms decay.
+ * The cymbal now holds its level for as long as the envelope says instead of falling
+ * away immediately, which gives the resonant colour filter time to ring up: measured
+ * at note 48, a pure oscillator cluster at full velocity and the brightest colour
+ * peaked at 0.80 before and 1.08 after, on the same trim. 0.72 puts that case back
+ * inside full scale, and costs the default hit about a decibel.
+ */
+const HAT_TRIM = 0.72;
 
 /**
  * How resonant the snare/hi-hat colour filter is. Fixed, because there is no spare
@@ -135,6 +147,153 @@ function semiToHz(semi) {
   return 440 * (2 ** ((semi - 69) / 12));
 }
 
+// ---------------------------------------------------------------------------
+// The shared AHD amplitude envelope
+//
+// Duplicated verbatim in modal-processor.js and percussion-processors.js, and
+// deliberately so: AudioWorkletGlobalScope has no module loader, so this cannot be
+// imported from audio/envelope.js the way the main thread imports it. Same situation
+// test/masterClip.test.js already polices for the clip curve, handled the same way --
+// test/workletEnvelope.test.js reads both files and fails if the two copies differ by
+// a character.
+//
+// This is the recursion form of audio/envelope.js's attackCurve/decayCurve: an add or
+// a multiply per sample instead of a Math.exp, the idiom this project already uses for
+// a decay. test/envelope.test.js runs this exact state machine against the closed form,
+// which is what holds the shape that is heard to the shape that is drawn.
+// ---------------------------------------------------------------------------
+
+/** −60 dB in nepers, and the span an offset −60 dB curve actually covers. */
+const ENV_LOG_1000 = Math.log(1000);
+const ENV_FLOOR = Math.exp(-ENV_LOG_1000);
+const ENV_SPAN = 1 - ENV_FLOOR;
+
+/** The stages, in the order one note passes through them. */
+const ENV_ATTACK = 0;
+const ENV_HOLD = 1;
+const ENV_DECAY = 2;
+const ENV_DONE = 3;
+
+/** Envelope state, preallocated on every voice like the rest of its fields. */
+function makeEnvelope() {
+  return {
+    /** False for a hit that carried no envelope -- see startEnvelope. */
+    active: false,
+    stage: ENV_DONE,
+    level: 1,
+    peak: 1,
+    remaining: 0,
+    exponential: false,
+    /** The un-normalised one-pole state, for the exponential curves. */
+    state: 1,
+    attackStep: 0,
+    attackFactor: 0,
+    holdFrames: 0,
+    decayFrames: 1,
+    decayStep: 0,
+    decayFactor: 0,
+    /** Attack + hold + decay, for sizing how long the voice can be heard. */
+    totalFrames: 0,
+  };
+}
+
+/**
+ * Latch one hit's envelope. `spec` is what audio/envelope.js's ahdEnvelope() returned,
+ * with its times in seconds and its step-boundary truncation already applied.
+ *
+ * A message with no envelope leaves this inactive, which renders as a constant 1 --
+ * so a note-on assembled by hand (the check pages under test/browser) still sounds
+ * rather than falling silent on a field it never knew to send.
+ */
+function startEnvelope(e, spec) {
+  if (!spec) {
+    e.active = false;
+    e.stage = ENV_DONE;
+    e.level = 1;
+    e.totalFrames = 0;
+    return;
+  }
+
+  const attackFrames = Math.round(spec.attack * sampleRate);
+  // The *requested* attack, not the truncated one: the curve is a function of what was
+  // asked for, which is what leaves a cut-short attack at spec.peak rather than at 1.
+  const fullFrames = Math.round(spec.attackFull * sampleRate);
+
+  e.active = true;
+  e.exponential = Boolean(spec.exponential);
+  e.peak = spec.peak;
+  e.state = 1;
+  e.holdFrames = Math.round(spec.hold * sampleRate);
+  e.decayFrames = Math.max(1, Math.round(spec.decay * sampleRate));
+  e.attackStep = attackFrames > 0 ? spec.peak / attackFrames : 0;
+  e.attackFactor = fullFrames > 0 ? Math.exp(-ENV_LOG_1000 / fullFrames) : 0;
+  e.decayStep = spec.peak / e.decayFrames;
+  e.decayFactor = Math.exp(-ENV_LOG_1000 / e.decayFrames);
+  e.totalFrames = attackFrames + e.holdFrames + e.decayFrames;
+
+  if (attackFrames > 0) {
+    e.stage = ENV_ATTACK;
+    e.level = 0;
+    e.remaining = attackFrames;
+  } else {
+    // A zero attack is at full level on its very first sample.
+    e.stage = ENV_HOLD;
+    e.level = spec.peak;
+    e.remaining = e.holdFrames;
+  }
+}
+
+/**
+ * One sample: the gain to multiply this frame by, with the state advanced past it.
+ * The level returned is the one from *before* the advance, which is what makes a zero
+ * attack audible on the frame the note starts rather than one frame later.
+ */
+function envelopeSample(e) {
+  if (!e.active) return 1;
+  const level = e.level;
+
+  if (e.stage === ENV_ATTACK) {
+    if (e.exponential) {
+      e.state *= e.attackFactor;
+      e.level = (1 - e.state) / ENV_SPAN;
+    } else {
+      e.level += e.attackStep;
+    }
+    e.remaining -= 1;
+    if (e.remaining <= 0) {
+      e.level = e.peak;
+      e.stage = ENV_HOLD;
+      e.remaining = e.holdFrames;
+      e.state = 1;
+    }
+  } else if (e.stage === ENV_HOLD) {
+    e.level = e.peak;
+    e.remaining -= 1;
+    if (e.remaining <= 0) {
+      e.stage = ENV_DECAY;
+      e.remaining = e.decayFrames;
+    }
+  } else if (e.stage === ENV_DECAY) {
+    if (e.exponential) {
+      e.state *= e.decayFactor;
+      e.level = (e.peak * (e.state - ENV_FLOOR)) / ENV_SPAN;
+    } else {
+      e.level -= e.decayStep;
+    }
+    e.remaining -= 1;
+    if (e.remaining <= 0 || e.level <= 0) {
+      e.level = 0;
+      e.stage = ENV_DONE;
+    }
+  } else {
+    e.level = 0;
+  }
+
+  return level;
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * A voice, preallocated at its widest. One flat bag rather than a class per
  * instrument's state: each processor only ever runs one instrument, so the unused
@@ -146,9 +305,14 @@ function makeVoice() {
     startFrame: 0,
     age: 0,
 
-    /** Amplitude envelope, and its per-sample decay. */
-    env: 0,
-    envFactor: 0,
+    /**
+     * The amplitude envelope, shared with the string and with the other two
+     * percussion voices -- one shape for the whole instrument. It is what replaced
+     * each voice's private exponential decay, so nothing below sets a decay of its
+     * own except the two that are timbre rather than length (the kick's noise burst
+     * and the snare's shell).
+     */
+    env: makeEnvelope(),
     /** Frames left before the voice is inaudible and can be reclaimed. */
     lifeRemaining: 0,
     /** Velocity, applied once at the end of the chain. */
@@ -204,7 +368,8 @@ function makeVoice() {
 /** Back to silence, with every filter's memory cleared. */
 function resetVoice(v) {
   v.active = false;
-  v.env = 0;
+  // A null spec is the "no envelope" case, which is exactly what a silent voice is.
+  startEnvelope(v.env, null);
   v.noiseEnv = 0;
   v.bodyEnv = 0;
   v.phase = 0;
@@ -409,6 +574,12 @@ class PercussionProcessor extends AudioWorkletProcessor {
     // message happened to arrive. See process().
     v.startFrame = Math.round(msg.startTime * sampleRate);
     v.amp = msg.amp;
+    startEnvelope(v.env, msg.env);
+    // The envelope is what silences a percussion hit now, so it is also what says how
+    // long the voice is worth rendering. A hit that carried none -- a message built by
+    // hand, see startEnvelope -- gets a second, which is longer than any of these three
+    // instruments' own tails and short enough that the pool still turns over.
+    v.lifeRemaining = v.env.active ? v.env.totalFrames : Math.round(sampleRate);
     this.initVoice(v, msg);
   }
 
@@ -445,8 +616,9 @@ class PercussionProcessor extends AudioWorkletProcessor {
   }
 
   /**
-   * Latch one hit's settings, and set `lifeRemaining` -- the pool reclaims a voice the
-   * moment that reaches zero, so a subclass that forgets it is a voice that never frees.
+   * Latch one hit's settings. `lifeRemaining` is not a subclass's job any more -- the
+   * shared envelope is what silences every one of these voices, so startVoice above
+   * sizes the life from it and a subclass only has to describe its own sound.
    * Unimplemented here on purpose: every real instrument overrides this. Parameters are
    * still named and documented, since this signature is the interface a subclass fills in.
    *
@@ -484,17 +656,15 @@ class KickProcessor extends PercussionProcessor {
     v.sweep = 1;
     v.sweepFactor = Math.exp(-1 / (Math.max(0.001, msg.sweepTime) * sampleRate));
 
-    v.env = 1;
-    v.envFactor = decayFactor(msg.decay);
-
     v.noiseAmp = msg.noiseAmp;
+    // The burst keeps an envelope of its own: it is the beater's click *inside* the
+    // hit, over long before the body is, so it is timbre rather than note length --
+    // which is the one thing the shared envelope owns.
     v.noiseEnv = 1;
     v.noiseEnvFactor = decayFactor(msg.noiseDecay);
     // Hinged on the starting pitch: the click belongs to the attack, so what counts as
     // "bright" for it scales with how high the sweep begins.
     setTilt(v, msg.fStart * TILT_HINGE, msg.tilt);
-
-    v.lifeRemaining = Math.round((msg.decay * 1.5 + 0.05) * sampleRate);
   }
 
   renderVoice(v, out, offset, length) {
@@ -515,11 +685,10 @@ class KickProcessor extends PercussionProcessor {
 
         // Starting at phase 0 means starting at a zero crossing, so the hit has no
         // click of its own beyond the one the noise burst is there to provide.
-        let sample = Math.sin(v.phase) * v.env;
+        let sample = Math.sin(v.phase);
         if (v.noiseAmp > 0) sample += tiltedNoise(v) * v.noiseEnv * v.noiseAmp;
 
-        out[i] += sample * v.amp * KICK_TRIM;
-        v.env *= v.envFactor;
+        out[i] += sample * envelopeSample(v.env) * v.amp * KICK_TRIM;
         v.noiseEnv *= v.noiseEnvFactor;
         i += 1;
       }
@@ -548,15 +717,13 @@ class SnareProcessor extends PercussionProcessor {
     v.bodyEnvFactor = decayFactor(msg.bodyDecay);
     v.exciteRemaining = 1;
 
+    // The rattle has no envelope of its own any more -- the shared one shapes it, and
+    // the shell's own ring above is the only decay left here, because how tight the
+    // shell is and how long the hit lasts are two different questions.
     v.noiseAmp = msg.noiseAmp;
-    v.noiseEnv = 1;
-    v.noiseEnvFactor = decayFactor(msg.noiseDecay);
     // Hinged above the shell, so the colour knob sweeps the rattle rather than
     // re-voicing the drum underneath it.
     setColorFilter(v, msg.bodyHz[0] * 8, msg.tilt);
-
-    const longest = Math.max(msg.noiseDecay, msg.bodyDecay);
-    v.lifeRemaining = Math.round((longest * 1.5 + 0.05) * sampleRate);
   }
 
   renderVoice(v, out, offset, length) {
@@ -584,11 +751,10 @@ class SnareProcessor extends PercussionProcessor {
           sample += body * v.bodyEnv * v.bodyAmp;
         }
 
-        if (v.noiseAmp > 0) sample += colorFilteredSample(v, noise()) * v.noiseEnv * v.noiseAmp;
+        if (v.noiseAmp > 0) sample += colorFilteredSample(v, noise()) * v.noiseAmp;
 
-        out[i] += sample * v.amp * SNARE_TRIM;
+        out[i] += sample * envelopeSample(v.env) * v.amp * SNARE_TRIM;
         v.bodyEnv *= v.bodyEnvFactor;
-        v.noiseEnv *= v.noiseEnvFactor;
         i += 1;
       }
 
@@ -615,12 +781,11 @@ class HihatProcessor extends PercussionProcessor {
     v.hatMix = msg.mix;
     for (let o = 0; o < 6; o += 1) v.oscInc[o] = msg.oscHz[o] / sampleRate;
 
-    v.noiseEnv = 1;
-    v.noiseEnvFactor = decayFactor(msg.decay);
+    // Nothing decays inside a hi-hat any more: the cymbal is a steady blend of
+    // cluster and noise, and the shared envelope alone decides whether it reads as
+    // closed or open.
     setColorFilter(v, msg.bandHz, msg.tilt);
     v.rumbleCoef = onePoleCoef(HAT_FLOOR_HZ);
-
-    v.lifeRemaining = Math.round((msg.decay * 1.5 + 0.02) * sampleRate);
   }
 
   renderVoice(v, out, offset, length) {
@@ -650,8 +815,7 @@ class HihatProcessor extends PercussionProcessor {
         // which is what the normalised colour gains exist to avoid.
         v.rumbleState += v.rumbleCoef * (cymbal - v.rumbleState);
 
-        out[i] += (cymbal - v.rumbleState) * v.noiseEnv * v.amp * HAT_TRIM;
-        v.noiseEnv *= v.noiseEnvFactor;
+        out[i] += (cymbal - v.rumbleState) * envelopeSample(v.env) * v.amp * HAT_TRIM;
         i += 1;
       }
 

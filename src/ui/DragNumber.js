@@ -13,7 +13,9 @@
  * necessary because it is small and sits inside a circle.
  */
 
-import { bindDragAxis, dragDeltaValue, FULL_RANGE_PX } from './dragGesture.js';
+import {
+  bindDragAxis, dragDeltaValue, expDragDeltaValue, FULL_RANGE_PX,
+} from './dragGesture.js';
 import { quantize } from './numberUtils.js';
 
 export class DragNumber {
@@ -134,7 +136,12 @@ export class DragNumber {
           this.#commit(this.values[Math.min(this.values.length - 1, Math.max(0, index))]);
           return;
         }
-        this.#commit(dragDeltaValue(this.dragStartValue, dy, this.spec.max - this.spec.min, shiftKey));
+        // A param can ask for its travel to be bunched toward its low end -- see
+        // dragGesture.js. Only the drag changes: the stored value, the readout, the
+        // arrow keys and the wheel are all in the param's own units either way.
+        this.#commit(this.spec.curve === 'exp'
+          ? expDragDeltaValue(this.dragStartValue, dy, this.spec.min, this.spec.max, shiftKey)
+          : dragDeltaValue(this.dragStartValue, dy, this.spec.max - this.spec.min, shiftKey));
       },
       onWheelNudge: (direction) => this.#nudge(direction),
       onDblClick: () => this.#commit(this.spec.def),

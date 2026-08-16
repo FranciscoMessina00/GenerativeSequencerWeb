@@ -1,5 +1,6 @@
 import { buildNote, midiToHz, modeGains } from './modal/modalModel.js';
 import { hatHit, kickHit, snareHit } from './percussion/percussionModel.js';
+import { ahdEnvelope } from './envelope.js';
 
 /**
  * What a track can play.
@@ -25,7 +26,13 @@ export const INSTRUMENTS = [
     name: 'Modal String',
     group: 'String',
     processor: 'modal-processor',
-    params: ['modes', 'stiffness', 'decay', 'damping', 'pluckSoftness'],
+    // The only instrument claiming envHold -- which is what makes the "each builder
+    // reaches only for its own instrument's params" test in test/instruments.test.js
+    // prove the three percussion builders never read it.
+    params: [
+      'modes', 'stiffness', 'damping', 'pluckSoftness',
+      'envAttack', 'envHold', 'envDecay', 'envCurve',
+    ],
     buildMessage: buildStringMessage,
   },
   {
@@ -34,7 +41,10 @@ export const INSTRUMENTS = [
     name: 'Kick',
     group: 'Kick',
     processor: 'kick-processor',
-    params: ['kickDecay', 'kickSweep', 'kickSweepTime', 'kickNoise', 'kickNoiseColor'],
+    params: [
+      'kickSweep', 'kickSweepTime', 'kickNoise', 'kickNoiseColor',
+      'envAttack', 'envDecay', 'envCurve',
+    ],
     buildMessage: buildKickMessage,
   },
   {
@@ -43,7 +53,10 @@ export const INSTRUMENTS = [
     name: 'Snare',
     group: 'Snare',
     processor: 'snare-processor',
-    params: ['snareDecay', 'snareNoise', 'snareNoiseColor', 'snareTone', 'snareBodyDecay'],
+    params: [
+      'snareNoise', 'snareNoiseColor', 'snareTone', 'snareBodyDecay',
+      'envAttack', 'envDecay', 'envCurve',
+    ],
     buildMessage: buildSnareMessage,
   },
   {
@@ -52,7 +65,7 @@ export const INSTRUMENTS = [
     name: 'Hi-hat',
     group: 'Hi-hat',
     processor: 'hihat-processor',
-    params: ['hatDecay', 'hatNoise', 'hatNoiseColor'],
+    params: ['hatNoise', 'hatNoiseColor', 'envAttack', 'envDecay', 'envCurve'],
     buildMessage: buildHatMessage,
   },
 ];
@@ -80,12 +93,50 @@ export function instrumentById(id) {
 // ---------------------------------------------------------------------------
 
 /**
+ * How many milliseconds of `envDecay` make one unit of the string's decayScale.
+ *
+ * The string is the one instrument whose decay is physics rather than a gain ramp:
+ * modeDecays() turns this into a per-mode T60, so damping and velocity keep shaping
+ * the ring exactly as they always did. 1000 is the identity with the `decay` param
+ * this replaced -- the old `decay: 1` is `envDecay: 1000 ms` -- which is what keeps
+ * every patch authored against the old knob sounding like itself.
+ *
+ * One named number rather than an inline divide, because it is the single thing to
+ * turn if the string's tail should sit longer or shorter against the same dial.
+ */
+const MS_PER_DECAY_UNIT = 1000;
+
+/**
+ * The amplitude envelope for one hit, cut against the step it lands on.
+ *
+ * `holdMs` is passed by the caller rather than read from `p` here: only the string
+ * has a hold stage, and the three percussion builders pass 0 so that a drum stays a
+ * strike instead of a tone gated open for a whole step.
+ */
+function envelopeFor(step, p, holdMs) {
+  return ahdEnvelope({
+    attackMs: p.envAttack,
+    holdMs,
+    decayMs: p.envDecay,
+    // Scheduler.pump() puts this on every step; a hit built outside the sequencer
+    // has none, and audio/envelope.js then truncates nothing.
+    stepSeconds: step.stepDuration,
+    exponential: p.envCurve,
+  });
+}
+
+/**
  * The string.
  *
  * The mode tables are built here on the main thread and handed over finished, so the
  * physics lives in one testable place and a note-on is a few hundred bytes rather than
  * a parameter negotiation. Both glides ramp *from the previous value into the current
  * one* across the step, which is why the step carries both ends.
+ *
+ * The only instrument that uses `envDecay` twice: once as the ring the modes are
+ * given (decayScale, below) and once as the envelope's own decay stage over the top.
+ * That is deliberate -- it is one dial meaning one thing, "how long is this note",
+ * expressed in the two places a struck string's length actually lives.
  */
 function buildStringMessage(step, p, sampleRate) {
   const note = buildNote({
@@ -99,7 +150,7 @@ function buildStringMessage(step, p, sampleRate) {
     modes: p.modes,
     stiffness: p.stiffness,
     damping: p.damping,
-    decayScale: p.decay,
+    decayScale: p.envDecay / MS_PER_DECAY_UNIT,
     sampleRate,
   });
 
@@ -129,17 +180,23 @@ function buildStringMessage(step, p, sampleRate) {
 
     velocity: step.velocity,
     pluckSoftness: p.pluckSoftness,
+
+    env: envelopeFor(step, p, p.envHold),
   };
 }
+
+// The three percussion builders pass a zero hold, which is the whole of "hold is the
+// string's alone": the panel hides the control for them (ui/EnvelopePanel.js), and
+// none of these three reads p.envHold, so the hidden value cannot leak into a hit.
 
 function buildKickMessage(step, p) {
   return {
     type: 'noteOn',
     startTime: step.audioTime,
+    env: envelopeFor(step, p, 0),
     ...kickHit({
       note: step.note,
       velocity: step.velocity,
-      decay: p.kickDecay,
       sweep: p.kickSweep,
       sweepTime: p.kickSweepTime,
       noise: p.kickNoise,
@@ -152,10 +209,10 @@ function buildSnareMessage(step, p) {
   return {
     type: 'noteOn',
     startTime: step.audioTime,
+    env: envelopeFor(step, p, 0),
     ...snareHit({
       note: step.note,
       velocity: step.velocity,
-      decay: p.snareDecay,
       noise: p.snareNoise,
       noiseColor: p.snareNoiseColor,
       tone: p.snareTone,
@@ -168,10 +225,10 @@ function buildHatMessage(step, p) {
   return {
     type: 'noteOn',
     startTime: step.audioTime,
+    env: envelopeFor(step, p, 0),
     ...hatHit({
       note: step.note,
       velocity: step.velocity,
-      decay: p.hatDecay,
       noise: p.hatNoise,
       noiseColor: p.hatNoiseColor,
     }),

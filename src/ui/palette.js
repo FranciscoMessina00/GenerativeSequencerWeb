@@ -168,6 +168,16 @@ export function paletteFor(page) {
     // page's signal", and they were the same literal before there were pages.
     lfoCurve: pulse,
     lfoZero: NEUTRAL.restLine,
+
+    // The envelope display is the same signal again, so the same colour -- but filled
+    // underneath rather than left as a line, because an envelope is a level and a
+    // shape with weight under it reads as one where a bare curve reads as a waveform.
+    envCurve: pulse,
+    envFill: alpha(pulse, 0.22),
+    envBaseline: NEUTRAL.restLine,
+    // The step boundary is not part of the signal -- it is the clock measured against
+    // it -- so it takes the brighter accent the playhead uses rather than the pulse.
+    envStep: alpha(mix(accent, '#ffffff', 0.35), 0.75),
   };
 
   cache.set(index, palette);
