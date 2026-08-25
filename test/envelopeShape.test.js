@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ahdEnvelope } from '../src/audio/envelope.js';
-import { MARGIN_TOP, envelopeShape } from '../src/ui/envelopeShape.js';
+import { DOT_INSET, MARGIN_TOP, envelopeShape } from '../src/ui/envelopeShape.js';
 
 /**
  * The envelope display's geometry. What is worth testing here is not that a curve was
@@ -37,6 +37,14 @@ test('the curve starts at the floor and ends at the floor', () => {
   const floor = shape.points[0].y;
   assert.equal(shape.points.at(-1).y, floor);
   assert.ok(Math.min(...shape.points.map((p) => p.y)) < floor, 'nothing rose at all');
+});
+
+test('the floor is the bottom of the box, with nothing left under it', () => {
+  // Silence sits on the frame rather than hovering above it -- a gap there read as the
+  // curve floating above its own baseline.
+  const shape = shapeOf();
+  assert.equal(shape.points[0].y, BOX.height);
+  assert.equal(Math.max(...shape.points.map((p) => p.y)), BOX.height);
 });
 
 test('the curve stays out of the band the step caption lives in', () => {
@@ -76,6 +84,88 @@ test('a zero attack starts at full level rather than at silence', () => {
   const shape = shapeOf({ attackMs: 0 });
   const lowest = Math.min(...shape.points.map((p) => p.y));
   assert.equal(shape.points[0].y, lowest, 'the first sample is already at the top');
+});
+
+// ---------------------------------------------------------------------------
+// The stage dots
+// ---------------------------------------------------------------------------
+
+test('both stage dots sit at the level the attack reached', () => {
+  const shape = shapeOf({ attackMs: 10, holdMs: 40, decayMs: 100 });
+  // Hold is flat, so the attack's end and the decay's start are the same height by
+  // construction -- what separates them is only how far along they are.
+  assert.equal(shape.attackEnd.y, shape.decayStart.y);
+  // And that height is the top of the drawn curve.
+  const highest = Math.min(...shape.points.map((p) => p.y));
+  assert.ok(Math.abs(shape.attackEnd.y - highest) < 1, `dot at ${shape.attackEnd.y}, curve peaks at ${highest}`);
+});
+
+test('the dots bracket the hold, in order', () => {
+  const shape = shapeOf({ attackMs: 10, holdMs: 40, decayMs: 100 });
+  assert.ok(shape.attackEnd.x < shape.decayStart.x, 'the decay cannot start before the attack ends');
+  // 10 ms and 50 ms through a 150 ms span.
+  assert.ok(Math.abs(shape.span - 0.15) < 1e-9, `span ${shape.span}`);
+  assert.ok(Math.abs(shape.attackEnd.x - (0.01 / 0.15) * BOX.width) < 1e-6);
+  assert.ok(Math.abs(shape.decayStart.x - (0.05 / 0.15) * BOX.width) < 1e-6);
+});
+
+test('with no hold the two dots are the same point', () => {
+  // Percussion, and any truncated attack. One dot is the right reading: there is one
+  // boundary, not two -- so nothing special-cases it, it simply falls out.
+  const shape = shapeOf({ attackMs: 20, holdMs: 0, decayMs: 100 });
+  assert.deepEqual(shape.attackEnd, shape.decayStart);
+});
+
+test('a truncated attack puts both dots on the step boundary', () => {
+  const shape = shapeOf({ attackMs: 500 });
+  assert.equal(shape.truncated, true);
+  assert.deepEqual(shape.attackEnd, shape.decayStart, 'a cut attack has no hold to bracket');
+  assert.ok(
+    Math.abs(shape.attackEnd.x - shape.stepMarkerX) < 1e-6,
+    `dot at ${shape.attackEnd.x}, boundary at ${shape.stepMarkerX}`,
+  );
+  // ...and below full level, since the ramp never got there.
+  assert.ok(shape.attackEnd.y > MARGIN_TOP + 1, 'a cut attack must draw below the top');
+});
+
+test('the decay-start dot lands on the boundary when hold is clamped to it', () => {
+  const shape = shapeOf({ attackMs: 10, holdMs: 5000 });
+  assert.ok(
+    Math.abs(shape.decayStart.x - shape.stepMarkerX) < 1e-6,
+    `dot at ${shape.decayStart.x}, boundary at ${shape.stepMarkerX}`,
+  );
+  // ...and the shape says so, which is what puts a warning on that dot.
+  assert.equal(shape.holdClamped, true);
+});
+
+test('a hold that fits raises no flag', () => {
+  const shape = shapeOf({ attackMs: 10, holdMs: 40, decayMs: 100 });
+  assert.equal(shape.holdClamped, false);
+  assert.equal(shape.truncated, false);
+});
+
+test('a cut attack flags itself and not the hold', () => {
+  // One warning, on one dot -- the two coincide there, so both would sit on the same
+  // point and say different things about it.
+  const shape = shapeOf({ attackMs: 500, holdMs: 500 });
+  assert.equal(shape.truncated, true);
+  assert.equal(shape.holdClamped, false);
+});
+
+test('a zero attack still draws a whole dot rather than half of one', () => {
+  // It genuinely ends at t = 0; a dot centred there would be half outside the frame.
+  const shape = shapeOf({ attackMs: 0 });
+  assert.equal(shape.attackEnd.x, DOT_INSET);
+});
+
+test('the dots stay inside the box at every extreme', () => {
+  for (const over of [{ attackMs: 0, holdMs: 0 }, { attackMs: 2000 }, { decayMs: 1 }]) {
+    const shape = shapeOf(over);
+    for (const dot of [shape.attackEnd, shape.decayStart]) {
+      assert.ok(dot.x >= 0 && dot.x <= BOX.width, `x ${dot.x} for ${JSON.stringify(over)}`);
+      assert.ok(dot.y >= 0 && dot.y <= BOX.height, `y ${dot.y} for ${JSON.stringify(over)}`);
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -151,6 +241,21 @@ test('no step means no marker, and the envelope alone sets the span', () => {
 // ---------------------------------------------------------------------------
 // Degenerate boxes -- a hidden panel measures zero, and is asked to draw anyway
 // ---------------------------------------------------------------------------
+
+test('a zero-sized box produces finite dots too', () => {
+  const shape = envelopeShape({
+    env: ahdEnvelope({
+      attackMs: 10, holdMs: 20, decayMs: 30, stepSeconds: STEP, exponential: false,
+    }),
+    stepSeconds: STEP,
+    width: 0,
+    height: 0,
+  });
+  for (const dot of [shape.attackEnd, shape.decayStart]) {
+    assert.ok(Number.isFinite(dot.x) && Number.isFinite(dot.y), `${dot.x},${dot.y}`);
+    assert.ok(dot.x >= 0, `a box with no width cannot push a dot negative: ${dot.x}`);
+  }
+});
 
 test('a zero-sized box produces finite points rather than NaN', () => {
   const shape = envelopeShape({

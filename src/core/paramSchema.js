@@ -128,7 +128,7 @@ export const PARAM_SCHEMA = [
   // few hundred, so a linear drag spent most of its travel on times nobody dials in
   // and gave 22 ms a pixel down where 5 ms matters. See ui/dragGesture.js.
   { key: 'envAttack', label: 'Attack', group: 'Envelope', target: 'voice', min: 0, max: 2000, step: 1, def: 10, display: 'ms', curve: 'exp' },
-  { key: 'envHold', label: 'Hold', group: 'Envelope', target: 'voice', min: 0, max: 1000, step: 1, def: 500, display: 'ms', curve: 'exp' },
+  { key: 'envHold', label: 'Hold', group: 'Envelope', target: 'voice', min: 0, max: 1000, step: 1, def: 80, display: 'ms', curve: 'exp' },
   // Also the string's ring: it is what modeDecays' decayScale is derived from, so the
   // instrument has one decay value rather than two disagreeing ones.
   { key: 'envDecay', label: 'Decay', group: 'Envelope', target: 'voice', min: 1, max: 4000, step: 1, def: 200, display: 'ms', curve: 'exp' },

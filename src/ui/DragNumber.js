@@ -33,6 +33,8 @@ export class DragNumber {
     this.describe = describe ?? format;
     this.onInput = onInput;
     this.value = spec.def;
+    /** Set through setDisabled -- see there for what it does and does not stop. */
+    this.disabled = false;
     /**
      * Enumerated params are walked by index rather than stepped by value: their
      * members are not evenly spaced, so adding `spec.step` would land between two of
@@ -102,7 +104,30 @@ export class DragNumber {
     this.#render();
   }
 
+  /**
+   * Grey it out and stop it changing, for a value the engine will not read.
+   *
+   * Opt-in: no caller that never calls this sees any difference. What it deliberately
+   * does NOT do is take the element out of the pointer's reach -- hovering a greyed
+   * control is how you find out why it is greyed, and the info footer needs a
+   * `pointerover` to say so. See EnvelopePanel, which adds the reason to this
+   * control's own `data-info` while it is disabled.
+   *
+   * The gestures are stopped at #commit rather than at each of the seven hooks
+   * bindDragAxis calls: every one of them -- drag, wheel, arrows, double-click --
+   * already funnels through it, so one guard covers the lot and cannot be forgotten
+   * when a new gesture is added.
+   */
+  setDisabled(disabled) {
+    this.disabled = Boolean(disabled);
+    this.element.classList.toggle('dragnum--disabled', this.disabled);
+    this.element.setAttribute('aria-disabled', String(this.disabled));
+    // Out of the tab order, but still hoverable and still announced when read.
+    this.element.tabIndex = this.disabled ? -1 : 0;
+  }
+
   #commit(next) {
+    if (this.disabled) return;
     const quantized = this.#quantize(next);
     if (quantized === this.value) return;
     this.value = quantized;

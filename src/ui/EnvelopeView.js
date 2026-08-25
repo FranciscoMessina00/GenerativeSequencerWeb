@@ -1,5 +1,5 @@
 import { ahdEnvelope } from '../audio/envelope.js';
-import { MARGIN_TOP, envelopeShape } from './envelopeShape.js';
+import { DOT_INSET, MARGIN_TOP, envelopeShape } from './envelopeShape.js';
 import { paletteFor } from './palette.js';
 
 /**
@@ -30,14 +30,24 @@ const LABEL_FONT = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
  */
 const LABEL_HEIGHT = 9;
 
+/**
+ * Radius of the stage dots. envelopeShape keeps them this far from the frame's edges
+ * (DOT_INSET), so the two numbers are one fact and are imported rather than repeated.
+ */
+const DOT_RADIUS = DOT_INSET;
+
 export class EnvelopeView {
   /**
    * @param {object} opts
    * @param {HTMLCanvasElement} opts.canvas sized by CSS; only its backing store is set here
+   * @param {(shape: ReturnType<typeof envelopeShape>) => void} [opts.onDraw] called
+   *   with the geometry every time it is recomputed -- for anything positioned against
+   *   the canvas that is not painted into it. See EnvelopePanel's warning badge.
    */
-  constructor({ canvas }) {
+  constructor({ canvas, onDraw }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
+    this.onDraw = onDraw ?? null;
 
     /** The envelope being drawn, in the shape ahdEnvelope() returns. */
     this.env = ahdEnvelope({
@@ -109,8 +119,11 @@ export class EnvelopeView {
     // on zero rather than as an empty panel.
     const floor = shape.points[0] ? Math.max(...shape.points.map((p) => p.y)) : h;
     ctx.beginPath();
-    ctx.moveTo(0, floor);
-    ctx.lineTo(w, floor);
+    // Half a pixel up when the floor is the bottom edge itself, which it now is: a
+    // 1px stroke centred on `h` would have half of itself outside the canvas.
+    const baseline = Math.min(floor, h - 0.5);
+    ctx.moveTo(0, baseline);
+    ctx.lineTo(w, baseline);
     ctx.strokeStyle = this.palette.envBaseline;
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -134,7 +147,29 @@ export class EnvelopeView {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
+    this.#drawStageDots(shape);
     this.#drawStepMarker(shape);
+
+    // Last, and with the geometry it was drawn from: whatever is positioned against
+    // this canvas rather than painted into it moves when the canvas does.
+    this.onDraw?.(shape);
+  }
+
+  /**
+   * The two stage boundaries: where the attack finishes, and where the decay leaves.
+   *
+   * Drawn after the curve so they sit on top of the line rather than under it. Both are
+   * at the same height, so hold is the gap between them -- and when there is no hold
+   * they land on each other and read as the single boundary they are.
+   */
+  #drawStageDots(shape) {
+    const ctx = this.ctx;
+    ctx.fillStyle = this.palette.envDot;
+    for (const dot of [shape.attackEnd, shape.decayStart]) {
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, DOT_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   /**

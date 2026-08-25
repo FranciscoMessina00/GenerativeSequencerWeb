@@ -105,7 +105,11 @@ export function decayCurve(x, exponential) {
  *
  * `attackFull` comes back alongside the truncated `attack` because the curve is a
  * function of the requested time: the worklet needs both to run an attack that ends
- * mid-ramp at the same level this file says it does.
+ * mid-ramp at the same level this file says it does. `holdFull` is there for a
+ * smaller reason -- nothing in the audio path reads it -- but it is what lets a
+ * caller see that a hold was shortened rather than merely see how long it ended up,
+ * and the display says so on screen. Returning it here keeps that comparison in the
+ * one place that knows the rules, instead of re-deriving them somewhere else.
  *
  * `stepSeconds` may be absent or zero -- a hit built outside the sequencer (a check
  * page assembling a message by hand) then gets the untruncated envelope, which is
@@ -118,15 +122,15 @@ export function decayCurve(x, exponential) {
  * @param {number} opts.decayMs   1..5000
  * @param {number} opts.stepSeconds the step this hit lands on, or 0 for none
  * @param {boolean} opts.exponential curve shape, shared by attack and decay
- * @returns {{ attack: number, attackFull: number, hold: number, decay: number,
- *   peak: number, exponential: boolean }} times in seconds
+ * @returns {{ attack: number, attackFull: number, hold: number, holdFull: number,
+ *   decay: number, peak: number, exponential: boolean }} times in seconds
  */
 export function ahdEnvelope({
   attackMs, holdMs, decayMs, stepSeconds, exponential,
 }) {
   const exp = Boolean(exponential);
   const attackFull = clamp(attackMs, 0, MAX_ATTACK_MS) / MS_PER_SECOND;
-  const requestedHold = clamp(holdMs, 0, MAX_HOLD_MS) / MS_PER_SECOND;
+  const holdFull = clamp(holdMs, 0, MAX_HOLD_MS) / MS_PER_SECOND;
   const decay = Math.max(MIN_DECAY, clamp(decayMs, 0, MAX_DECAY_MS) / MS_PER_SECOND);
 
   // No step to cut against: nothing is truncated.
@@ -139,14 +143,31 @@ export function ahdEnvelope({
 
   // A truncated attack skips the hold outright rather than shortening it: the level
   // never reached the peak, so there is nothing there to hold at.
-  const hold = attack >= step ? 0 : Math.min(requestedHold, step - attack);
+  const hold = attack >= step ? 0 : Math.min(holdFull, step - attack);
 
-  return { attack, attackFull, hold, decay, peak, exponential: exp };
+  return { attack, attackFull, hold, holdFull, decay, peak, exponential: exp };
 }
 
 /** Seconds from note-on to silence -- what a voice's life should be sized against. */
 export function envelopeDuration(env) {
   return env.attack + env.hold + env.decay;
+}
+
+/**
+ * The two ways the step can have overruled what was asked for, as predicates rather
+ * than as expressions repeated wherever they are needed.
+ *
+ * `peak` below 1 IS a cut attack: an attack that completed reaches full level by
+ * definition, so there is nothing else to compare. And a cut attack skips the hold
+ * outright rather than shortening it, which is why the second excludes the first --
+ * a hold of zero out of five hundred is not a clamp, it is a stage that never ran.
+ */
+export function attackWasCut(env) {
+  return env.peak < 1;
+}
+
+export function holdWasClamped(env) {
+  return env.peak >= 1 && env.hold < env.holdFull;
 }
 
 /**

@@ -178,6 +178,10 @@ export function paletteFor(page) {
     // The step boundary is not part of the signal -- it is the clock measured against
     // it -- so it takes the brighter accent the playhead uses rather than the pulse.
     envStep: alpha(mix(accent, '#ffffff', 0.35), 0.75),
+    // The stage boundaries, marked on the curve itself. Opaque and the same brightened
+    // accent the playhead uses: they sit on top of a line drawn in `envCurve`, so they
+    // have to out-read it rather than blend into it.
+    envDot: mix(accent, '#ffffff', 0.35),
   };
 
   cache.set(index, palette);
