@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import {
   ahdEnvelope,
   attackCurve,
+  attackWasCut,
   decayCurve,
   envelopeDuration,
   envelopeLevel,
+  holdWasClamped,
 } from '../src/audio/envelope.js';
 import { paramSpec } from '../src/core/paramSchema.js';
 
@@ -161,6 +163,65 @@ test('the decay keeps its full length however little of the step is left', () =>
 test('a long envelope bleeds past its step rather than being cut to fit', () => {
   const env = base({ attackMs: 10, holdMs: 500, decayMs: 5000 });
   assert.ok(envelopeDuration(env) > STEP * 20, 'the tail outlives many steps');
+});
+
+// ---------------------------------------------------------------------------
+// What the step overruled, as the display asks it
+// ---------------------------------------------------------------------------
+
+test('holdFull carries what was asked for, alongside what was allowed', () => {
+  const env = base({ attackMs: 10, holdMs: 500 });
+  assert.equal(env.holdFull, 0.5, 'the request survives the clamp');
+  assert.equal(env.hold, STEP - 0.01, 'and the step decided what actually runs');
+});
+
+test('a hold that fits was not clamped', () => {
+  const env = base({ attackMs: 10, holdMs: 40 });
+  assert.equal(env.hold, env.holdFull);
+  assert.equal(holdWasClamped(env), false);
+  assert.equal(attackWasCut(env), false);
+});
+
+test('a hold cut off by the step boundary reports itself', () => {
+  const env = base({ attackMs: 10, holdMs: 500 });
+  assert.equal(holdWasClamped(env), true);
+  assert.equal(attackWasCut(env), false, 'the attack itself fitted');
+});
+
+test('no hold asked for is not a clamped hold', () => {
+  // Percussion, and any string set to zero. Nothing was taken away.
+  assert.equal(holdWasClamped(base({ holdMs: 0 })), false);
+});
+
+test('a cut attack reports itself, and never also as a clamped hold', () => {
+  // The stage is skipped outright there rather than shortened, so a hold of zero out
+  // of five hundred is not a clamp -- and the two warnings would otherwise land on
+  // the same point, since the stage boundaries coincide when there is no hold.
+  const env = base({ attackMs: 500, holdMs: 500 });
+  assert.equal(attackWasCut(env), true);
+  assert.equal(env.hold, 0);
+  assert.ok(env.holdFull > 0, 'a hold was asked for');
+  assert.equal(holdWasClamped(env), false, 'but skipping is not clamping');
+});
+
+test('the two never both hold, across the whole range either side of the boundary', () => {
+  for (let attackMs = 0; attackMs <= 300; attackMs += 5) {
+    for (const holdMs of [0, 40, 500]) {
+      const env = base({ attackMs, holdMs });
+      assert.ok(
+        !(attackWasCut(env) && holdWasClamped(env)),
+        `both fired at attackMs ${attackMs}, holdMs ${holdMs}`,
+      );
+    }
+  }
+});
+
+test('with no step to cut against, nothing is overruled', () => {
+  const env = ahdEnvelope({
+    attackMs: 400, holdMs: 300, decayMs: 200, stepSeconds: 0, exponential: false,
+  });
+  assert.equal(attackWasCut(env), false);
+  assert.equal(holdWasClamped(env), false);
 });
 
 // ---------------------------------------------------------------------------

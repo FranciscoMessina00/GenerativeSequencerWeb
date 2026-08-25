@@ -166,6 +166,135 @@ check('the drawn attack is cut at the step boundary', panel.view.env.attack, 0.1
 check('and it never reaches full level', panel.view.env.peak < 1, true);
 
 // ---------------------------------------------------------------------------
+// The out-of-bounds warning, and the Hold it makes unreachable
+// ---------------------------------------------------------------------------
+
+// Back to an envelope that fits, so the transitions below are visible in both
+// directions rather than starting already tripped.
+panel.setValue('envAttack', 10);
+panel.setValue('envHold', 500);
+panel.setValue('envDecay', 200);
+await settle();
+
+const [warn, warnHold] = panel.element.querySelectorAll('.envelope__warn');
+const scopeEl = panel.element.querySelector('.envelope__scope');
+const hold = panel.holdControl.element;
+const visible = (el) => getComputedStyle(el).display !== 'none';
+const warnShown = () => visible(warn);
+/** Where the geometry says the attack was cut, in page coordinates. */
+const cutLeft = () => scopeEl.getBoundingClientRect().left + envelopeShape({
+  env: panel.view.env,
+  stepSeconds: panel.view.stepSeconds,
+  width: panel.view.cssWidth,
+  height: panel.view.cssHeight,
+}).attackEnd.x;
+
+// 10 + 500 against a 125 ms step: the attack fits, the hold does not.
+check('no attack warning while the attack fits', warnShown(), false);
+check('...but the hold is flagged as cut short', visible(warnHold), true);
+check('...on the second dot, not the first', (() => {
+  const shape = envelopeShape({
+    env: panel.view.env,
+    stepSeconds: panel.view.stepSeconds,
+    width: panel.view.cssWidth,
+    height: panel.view.cssHeight,
+  });
+  const left = warnHold.getBoundingClientRect().left - scopeEl.getBoundingClientRect().left;
+  return left >= shape.decayStart.x && shape.decayStart.x > shape.attackEnd.x;
+})(), true);
+check('...naming its own description', warnHold.dataset.info, 'envHoldCut');
+// Nothing is disabled for a clamped hold: the value is still doing something, and a
+// slower tempo would give all of it back.
+check('...and Hold is live', hold.classList.contains('dragnum--disabled'), false);
+check('...with the reason on its description', hold.dataset.info, 'envHold envHoldCut');
+
+// A hold short enough to finish inside the step clears it.
+panel.setValue('envHold', 40);
+await settle();
+check('a hold that fits raises nothing', visible(warnHold), false);
+check('...and Hold describes only itself', hold.dataset.info, 'envHold');
+panel.setValue('envHold', 500);
+await settle();
+
+// 250 ms of attack cannot fit a 125 ms step.
+panel.setValue('envAttack', 250);
+await settle();
+
+check('the warning appears once the attack overruns', warnShown(), true);
+// Never both: a cut attack skips the hold rather than shortening it, and the two dots
+// coincide there -- two badges would sit on one point saying different things.
+check('...and the hold warning steps aside', visible(warnHold), false);
+check('...it is inside the display', (() => {
+  const box = scopeEl.getBoundingClientRect();
+  const badge = warn.getBoundingClientRect();
+  return badge.left >= box.left - 1 && badge.right <= box.right + 1
+    && badge.top >= box.top - 1 && badge.bottom <= box.bottom + 1;
+})(), true);
+// Right of the cut, not on top of it: above would land in the "Step Length" caption
+// whenever the attack overran the boundary only slightly.
+check('...to the right of the cut', warn.getBoundingClientRect().left >= cutLeft(), true);
+check('...and it names its own description', warn.dataset.info, 'envClipped');
+
+check('Hold greys out with it', hold.classList.contains('dragnum--disabled'), true);
+check('...and says so', hold.getAttribute('aria-disabled'), 'true');
+check('...out of the tab order', hold.tabIndex, -1);
+// Still hoverable: that is how you find out why it is grey, so the footer must reach
+// it -- which pointer-events: none would have broken.
+check('...still reachable by the pointer', getComputedStyle(hold).pointerEvents !== 'none', true);
+check('...and the footer explains both', hold.dataset.info, 'envHold envClipped');
+
+// The value survives, and no gesture can move it. Wheel and keys rather than a
+// synthetic drag: bindDragAxis captures the pointer on pointerdown, and a fabricated
+// pointerId has nothing to capture. Every gesture funnels through the same #commit
+// the guard sits in, so these two prove all four.
+events.length = 0;
+const heldValue = panel.holdControl.value;
+check('the guard is set on the control itself', panel.holdControl.disabled, true);
+hold.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }));
+check('the wheel cannot move disabled Hold', panel.holdControl.value, heldValue);
+hold.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+check('nor can the arrow keys', panel.holdControl.value, heldValue);
+hold.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+check('nor double-click-to-default', panel.holdControl.value, heldValue);
+check('...and none of it emitted', events.length, 0);
+
+// ...and it all comes back.
+panel.setValue('envAttack', 10);
+await settle();
+check('the warning goes away again', warnShown(), false);
+check('...Hold comes back', hold.classList.contains('dragnum--disabled'), false);
+check('...in the tab order', hold.tabIndex, 0);
+check('...with the value it was holding', panel.holdControl.value, heldValue);
+
+// ---------------------------------------------------------------------------
+// The stage dots
+// ---------------------------------------------------------------------------
+
+// The geometry is envelopeShape's and is covered in Node; what the browser adds is
+// that the view actually paints them. Compare the pixels at the attack's end against
+// the same spot with the dots' own colour removed from the equation -- a dot is the
+// only thing drawn above the curve there.
+{
+  panel.setValue('envHold', 300);
+  await settle();
+  const shape = envelopeShape({
+    env: panel.view.env,
+    stepSeconds: panel.view.stepSeconds,
+    width: panel.view.cssWidth,
+    height: panel.view.cssHeight,
+  });
+  const dpr = window.devicePixelRatio || 1;
+  const ctx = panel.element.querySelector('.envelope__canvas').getContext('2d');
+  const at = (dot) => {
+    const px = ctx.getImageData(Math.round(dot.x * dpr), Math.round(dot.y * dpr), 1, 1).data;
+    return px[3];
+  };
+  check('the attack-end dot is painted', at(shape.attackEnd) > 0, true);
+  check('the decay-start dot is painted', at(shape.decayStart) > 0, true);
+  check('the two are apart while there is a hold', shape.decayStart.x > shape.attackEnd.x, true);
+}
+
+// ---------------------------------------------------------------------------
 // Track-bound, like every other composite
 // ---------------------------------------------------------------------------
 

@@ -11,6 +11,8 @@ import { INFO_HINT, INFO_TEXT } from '../src/ui/infoText.js';
  */
 const NON_PARAM_IDS = new Set([
   'axisLock',
+  'envClipped',
+  'envHoldCut',
   'envScope',
   'lfoScope',
   'lfoMap',

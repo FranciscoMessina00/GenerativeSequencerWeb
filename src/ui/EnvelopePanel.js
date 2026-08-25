@@ -1,4 +1,4 @@
-import { ahdEnvelope } from '../audio/envelope.js';
+import { ahdEnvelope, attackWasCut, holdWasClamped } from '../audio/envelope.js';
 import { instrumentById } from '../audio/instruments.js';
 import { DragNumber } from './DragNumber.js';
 import { EnvelopeView } from './EnvelopeView.js';
@@ -27,6 +27,9 @@ import { formatMilliseconds } from './numberUtils.js';
  *                    It moves with tempo, division and step modifier, none of which
  *                    this panel owns.
  */
+
+/** How far right of the cut the warning badge sits, in CSS pixels. */
+const WARN_OFFSET_X = 6;
 
 /**
  * The two curve glyphs: a straight 45deg line (linear), a quadratic curve
@@ -136,7 +139,9 @@ export class EnvelopePanel {
   /** Redraw against the current step duration -- tempo, division or modifier moved. */
   refresh() {
     this.stepSeconds = Number(this.getStepSeconds()) || 0;
-    this.view.setEnvelope(this.#envelope(), this.stepSeconds);
+    const env = this.#envelope();
+    this.#syncHoldReach(env);
+    this.view.setEnvelope(env, this.stepSeconds);
   }
 
   /** Draw in a different page's colours -- see ui/palette.js. */
@@ -169,11 +174,91 @@ export class EnvelopePanel {
     canvas.setAttribute('aria-hidden', 'true');
     wrap.appendChild(canvas);
 
+    // Real elements over the canvas rather than glyphs painted into it: the whole
+    // info-footer mechanism is `data-info` on a DOM node (main.js's delegated
+    // pointerover), and a canvas has no sub-regions to hang that on. Both hidden until
+    // there is something to warn about -- see #placeWarnings.
+    //
+    // Two, one per stage boundary, and never both at once: an attack that overran
+    // skips the hold rather than shortening it, so the second warning's own condition
+    // excludes the first's. They would otherwise land on the same point, since the two
+    // dots coincide when there is no hold.
+    this.warnAttackEl = this.#buildWarning(
+      'envClipped',
+      'The attack runs past the step and will be cut',
+    );
+    this.warnHoldEl = this.#buildWarning(
+      'envHoldCut',
+      'The hold reaches the end of the step and stops there',
+    );
+    wrap.append(this.warnAttackEl, this.warnHoldEl);
+
     // Constructed while this wrapper is still detached, so the canvas cannot be
     // measured yet -- EnvelopeView carries a ResizeObserver for exactly that, and
-    // nothing here needs to call resize().
-    this.view = new EnvelopeView({ canvas });
+    // nothing here needs to call resize(). onDraw is what places the badges, for the
+    // same reason: the first real geometry arrives with the first real measurement,
+    // and every later redraw (resize, palette, a new envelope) goes through it too.
+    this.view = new EnvelopeView({ canvas, onDraw: (shape) => this.#placeWarnings(shape) });
     return wrap;
+  }
+
+  /** One `!` badge, described through the info footer like every other control. */
+  #buildWarning(infoId, label) {
+    const el = document.createElement('span');
+    el.className = 'envelope__warn';
+    el.dataset.info = infoId;
+    el.textContent = '!';
+    el.setAttribute('role', 'img');
+    el.setAttribute('aria-label', label);
+    el.hidden = true;
+    return el;
+  }
+
+  /**
+   * Put each warning on the boundary it is about, or take it away.
+   *
+   * To the right of its point rather than above it: right is the empty side (the curve
+   * is falling away from both of these), while above would land in the "Step Length"
+   * caption's band whenever the stage ended near full level -- which is precisely when
+   * these fire.
+   */
+  #placeWarnings(shape) {
+    this.#placeWarning(this.warnAttackEl, shape.truncated, shape.attackEnd);
+    this.#placeWarning(this.warnHoldEl, shape.holdClamped, shape.decayStart);
+  }
+
+  #placeWarning(el, shown, at) {
+    el.hidden = !shown;
+    if (!shown) return;
+    const limit = Math.max(0, this.view.cssWidth - (el.offsetWidth || 0) - 2);
+    el.style.left = `${Math.min(at.x + WARN_OFFSET_X, limit)}px`;
+    el.style.top = `${at.y}px`;
+  }
+
+  /**
+   * How much of Hold the step is letting through, reflected onto the control itself.
+   *
+   * Three states, and the difference between the last two is the point:
+   *
+   *   the attack was cut     the stage is skipped outright (ahdEnvelope's rule 1), so
+   *                          the control is greyed -- a dial the engine will not read
+   *   the hold was clamped   the stage runs, just not for as long as it says. Nothing
+   *                          is disabled: the value is still doing something, and
+   *                          slowing the tempo would give all of it back
+   *   neither                Hold means exactly what it says
+   *
+   * The reason joins the control's own description rather than replacing it, so the
+   * footer reads what Hold is and what the step is doing to it at once. `data-info`
+   * taking several space-separated ids is the same feature the bias/spread track uses.
+   */
+  #syncHoldReach(env) {
+    const cut = attackWasCut(env);
+    this.holdControl.setDisabled(cut);
+
+    const key = this.specs.hold.key;
+    if (cut) this.holdControl.element.dataset.info = `${key} envClipped`;
+    else if (holdWasClamped(env)) this.holdControl.element.dataset.info = `${key} envHoldCut`;
+    else this.holdControl.element.dataset.info = key;
   }
 
   /**

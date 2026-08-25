@@ -1,4 +1,6 @@
-import { envelopeDuration, envelopeLevel } from '../audio/envelope.js';
+import {
+  attackWasCut, envelopeDuration, envelopeLevel, holdWasClamped,
+} from '../audio/envelope.js';
 
 /**
  * The envelope display's geometry: where the curve goes, and where the step boundary
@@ -25,14 +27,25 @@ import { envelopeDuration, envelopeLevel } from '../audio/envelope.js';
  */
 export const MARGIN_TOP = 16;
 
-/** Enough that a tail resting at zero does not merge with the frame. */
-export const MARGIN_BOTTOM = 4;
+/**
+ * Zero, deliberately: the envelope sits on the floor of its box.
+ */
+export const MARGIN_BOTTOM = 0;
 
 /**
  * Never more than a quarter of the box, so a canvas smaller than the panel's own
  * (a check page, a future compact layout) still gets a curve rather than a sliver.
  */
 const MAX_TOP_FRACTION = 0.25;
+
+/**
+ * How far a stage dot is kept from the left and right edges.
+ *
+ * A drawing concession, not a claim about where the stage is: a zero attack genuinely
+ * ends at t = 0, and a dot centred there would be half outside the frame. Matching
+ * EnvelopeView's own dot radius is what makes the whole circle visible.
+ */
+export const DOT_INSET = 3;
 
 /**
  * Where the curve and the step marker sit inside a `width` x `height` box.
@@ -52,8 +65,10 @@ const MAX_TOP_FRACTION = 0.25;
  * @param {number} opts.height CSS pixels
  * @param {number} [opts.samples] polyline resolution; defaults to a point per pixel,
  *   which is what keeps the linear curve's corners sharp
- * @returns {{ points: Array<{x: number, y: number}>, stepMarkerX: number|null,
- *   span: number, truncated: boolean, bleeds: boolean }}
+ * @returns {{ points: Array<{x: number, y: number}>,
+ *   attackEnd: {x: number, y: number}, decayStart: {x: number, y: number},
+ *   stepMarkerX: number|null, span: number, truncated: boolean,
+ *   holdClamped: boolean, bleeds: boolean }}
  */
 export function envelopeShape({ env, stepSeconds, width, height, samples }) {
   const w = Math.max(0, Number(width) || 0);
@@ -76,8 +91,22 @@ export function envelopeShape({ env, stepSeconds, width, height, samples }) {
     };
   }
 
+  // The two stage boundaries, for the dots that mark them. Both sit at `peak` -- the
+  // attack ends there and the decay leaves from there -- so they are the same point
+  // whenever there is no hold between them, which is exactly the reading wanted: no
+  // hold, one dot. Nothing special-cases it.
+  // Never more than half the box, so a canvas too narrow to hold the inset still
+  // places both dots inside itself rather than folding them past each other.
+  const inset = Math.min(DOT_INSET, w / 2);
+  const atPeak = (seconds) => ({
+    x: Math.min(w - inset, Math.max(inset, (seconds / span) * w)),
+    y: bottom - env.peak * usable,
+  });
+
   return {
     points,
+    attackEnd: atPeak(env.attack),
+    decayStart: atPeak(env.attack + env.hold),
     // Clamped to the box: with span taken as the longer of the two, the boundary is
     // inside it by construction, but a zero-length span would otherwise divide badly.
     stepMarkerX: step > 0 ? Math.min(w, (step / span) * w) : null,
@@ -85,7 +114,12 @@ export function envelopeShape({ env, stepSeconds, width, height, samples }) {
     // The attack ran past the step and was cut mid-ramp -- the marker then ends
     // exactly where the ramp breaks into the decay, which is the case the issue
     // singles out.
-    truncated: env.peak < 1,
+    truncated: attackWasCut(env),
+    // The attack fitted but the hold did not, so it ends at the boundary instead of
+    // where it was set to. Never true at the same time as `truncated` -- see the two
+    // predicates -- which is what stops both warnings landing on the one point the
+    // dots coincide at when there is no hold.
+    holdClamped: holdWasClamped(env),
     // The tail outlives the step it started on and carries into the next.
     bleeds: total > step,
   };

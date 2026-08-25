@@ -659,6 +659,26 @@ input[type="range"]::-moz-range-thumb {
   background: var(--accent-16);
   border-color: var(--accent-50);
 }
+
+/* A value the engine will not read -- see DragNumber.setDisabled. Deliberately still
+   hoverable, and deliberately not `pointer-events: none`: hovering a greyed control is
+   how you find out why it is greyed, and the info footer needs the pointer to land on
+   it to say so. The hover states above are cancelled instead. */
+.dragnum--disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.dragnum--disabled:hover,
+.dragnum--disabled:focus-visible {
+  background: none;
+  border-color: transparent;
+}
+.dragnum--disabled:hover .dragnum__value,
+.dragnum--disabled:focus-visible .dragnum__value {
+  color: var(--text);
+  text-shadow: none;
+}
+.dragnum--disabled:hover .dragnum__label { color: var(--muted); }
 .control.toggle input[type="checkbox"] {
   width: 15px;
   height: 15px;
@@ -1330,8 +1350,36 @@ input[type="range"]::-moz-range-thumb {
   height: 68px;
   background: var(--well);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 2px;
   overflow: hidden;
+  /* The out-of-bounds badge is placed against this box -- see .envelope__warn. */
+  position: relative;
+}
+
+/* The warning that the attack runs past the step. A DOM element rather than a painted
+   glyph so it can be hovered: that is how it describes itself, through data-info and
+   the info footer, like every other control on the page.
+
+   Positioned by EnvelopePanel from the canvas geometry, so only what cannot come from
+   there is set here. translate(0,-50%) centres it on the point it is pointing at. */
+.envelope__warn {
+  position: absolute;
+  transform: translate(0, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--well);
+  border: 1px solid var(--accent-alt);
+  color: var(--accent-alt);
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* It sits on the curve, so it must not eat a drag meant for anything underneath --
+     but it still needs to be hoverable for the footer, which pointer-events: none
+     would break. Nothing under it is interactive, so plain hover is right. */
+  cursor: help;
+  user-select: none;
 }
 
 /* display:block matters: an inline canvas picks up baseline whitespace and then its
@@ -1432,7 +1480,7 @@ input[type="range"]::-moz-range-thumb {
   height: 68px;
   background: var(--well);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 2px;
   overflow: hidden;
 }
 

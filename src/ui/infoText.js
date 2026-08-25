@@ -122,6 +122,10 @@ export const INFO_TEXT = {
   lfoScope: 'LFO Scope — one cycle of the current shape, after folding.',
   // The envelope's canvas: a picture, like the LFO's, with no param of its own.
   envScope: 'Envelope — one note\'s shape. The line along the top marks how much of it fits inside one step.',
+  // The badge on that canvas when the attack overruns, and the reason Hold greys out.
+  envClipped: 'Attack Cut — the attack runs past the step, so it stops at the boundary and decays from there with no hold.',
+  // The other badge: the hold runs, but the step ends it early. Nothing is disabled.
+  envHoldCut: 'Hold Cut Short — attack plus hold reaches the end of the step, so the hold stops there and the decay begins.',
   lfoMap: 'Map — press, then click any highlighted control to point the LFO at it. Escape cancels.',
   lfoClear: 'Clear — unmaps the LFO from whatever it is currently pointed at.',
   // A track tab. The mute dot, level and swing numbers inside it carry their own
