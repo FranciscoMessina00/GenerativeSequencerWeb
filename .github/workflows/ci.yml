@@ -1,12 +1,33 @@
-# Runs the same checks deploy.yml gates a release on, but on every push and every
-# pull request -- so a mistake shows up the moment it's pushed, not the next time
-# someone cuts a release. Verify-only: nothing here ever builds or publishes the
-# site, whatever branch or PR triggered it.
+# Everything that happens to a commit before it is released: it is verified, and --
+# unless it landed on master -- published to the Cloudflare preview site so it can be
+# looked at, and heard, on a real device.
+#
+# `push` is the only code trigger, and that is the point. `pull_request` fires for the
+# same commits on any branch with an open PR, and its concurrency group is a different
+# ref (refs/pull/N/merge, not refs/heads/foo), so neither run cancelled the other: one
+# commit used to start four workflow runs and ten jobs, eight of them byte-identical
+# verification and two of them the same site pushed to Cloudflare twice. Dropping
+# `pull_request` costs two things, both accepted deliberately: the run checks the branch
+# tip rather than the branch merged into master, and a fork's PR would never be verified
+# -- neither of which applies to a repo with no protection rules and no outside
+# contributors. Check runs attach to the head SHA, so a PR still shows these results.
+#
+# It also means `github.ref` is always a real branch, so a preview deployment lands under
+# the branch's own name instead of a `pull-N-merge` alias.
+#
+# Cloudflare specifically, not a plain http:// server: AudioWorklet -- what this app's
+# entire audio engine is built on, see AudioEngine.js's addModule() calls -- is disabled
+# by browsers on insecure origins. A preview served over bare http:// would load and look
+# right, then make no sound at all. Cloudflare Pages is HTTPS by default.
+#
+# One-time repo setup the preview job depends on: two secrets, CLOUDFLARE_API_TOKEN and
+# CLOUDFLARE_ACCOUNT_ID, under Settings -> Secrets and variables -> Actions. Until both
+# are set it fails at the deploy step with an auth error rather than silently. See
+# README.md's "Testing on a phone" section for how to get them.
 name: CI
 
 on:
   push:
-  pull_request:
   # For a manual re-run from the Actions tab, same as deploy.yml offers.
   workflow_dispatch:
 
@@ -14,12 +35,54 @@ permissions:
   contents: read
 
 concurrency:
-  # Keyed on the ref, not a fixed target like deploy.yml's `pages` group: a second
-  # push to the same branch or PR should cancel the run already in flight for it,
-  # rather than queuing behind it or running both to completion.
+  # Keyed on the ref: a second push to the same branch should cancel the run already in
+  # flight for it rather than queuing behind it or running both to completion.
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # The one definition of "passing" for this repo -- see verify.yml, which deploy.yml
+  # calls too. No `ref`: the commit that triggered this run is the one to check.
   verify:
     uses: ./.github/workflows/verify.yml
+
+  # Everything except master. Deliberately the complement rather than an allow-list of
+  # branch-naming conventions, so a branch never has to be named a particular way to get
+  # a preview -- and master is excluded because its home is production GitHub Pages on a
+  # release (deploy.yml), not the preview site.
+  #
+  # A Cloudflare outage now reddens this whole run rather than a separate Preview one.
+  # `needs: verify` keeps the verdict on the code visible as its own job either way.
+  preview:
+    needs: verify
+    if: github.ref != 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # The same script deploy.yml stages production with, so the preview and the live
+      # site cannot quietly become different apps -- see scripts/stage-site.mjs, which
+      # holds the allow-list of what "the site" is.
+      - name: Stage the public site
+        run: node scripts/stage-site.mjs _site
+
+      # `wrangler pages deploy` does NOT create the project itself -- it 404s ("Project
+      # not found") the first time, before one exists. This does, and is idempotent:
+      # `|| true` swallows the "already exists" error every run after the first, so
+      # nobody has to click through the Cloudflare dashboard by hand to bootstrap it.
+      # The production branch named here is irrelevant to this repo (deploy.yml/GitHub
+      # Pages is what "production" means here); Pages requires the flag regardless.
+      - name: Ensure the Cloudflare Pages project exists
+        run: npx wrangler pages project create generative-sequencer-preview --production-branch=master || true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Prints that push's own deployment URL in the job log every run.
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy _site --project-name=generative-sequencer-preview

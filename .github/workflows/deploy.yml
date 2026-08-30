@@ -17,44 +17,96 @@ on:
   # to, and not before.
   release:
     types: [published]
-  # ...or on demand from the Actions tab, for a redeploy with no new release behind it.
+  # ...or on demand from the Actions tab. See the `resolve` job for what a manual run
+  # publishes -- it is the current release by default, NOT master.
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag or branch to publish. Blank = the current release.
+        required: false
+        type: string
+        default: ''
 
-# id-token is what actions/deploy-pages uses to authenticate the deployment; pages
-# write is the actual publish permission.
+# Least privilege at the root; the two publish scopes are granted per job below, so
+# `resolve` and `verify` never hold rights they cannot use.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # NOT cancel-in-progress. A deployment already writing to Pages must be allowed to
+  # finish -- killing one half-written is how the live site ends up serving a mixture
+  # of two releases. GitHub's own Pages starter workflow says the same.
+  cancel-in-progress: false
 
 jobs:
-  # The same bar a push or a PR already has to clear -- see verify.yml, which is
-  # what actually defines "passing" for this repo, and ci.yml, which runs it more
-  # often. Calling it here rather than keeping a second copy is what stops the two
-  # from quietly drifting apart.
+  # What this run is going to publish, decided once so that everything below agrees.
+  #
+  # A release publishes its own tag. A manual run publishes whatever was typed, or --
+  # when nothing was -- the current release, which is what `gh release view` returns
+  # (GitHub's "latest" is the newest release that is neither a draft nor a
+  # pre-release). Before this job existed a manual run silently published master HEAD,
+  # so "redeploy" could ship unreleased work; now it means "put the live site back".
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - id: pick
+        env:
+          # gh is preinstalled on the runner; contents:read is enough to read the
+          # releases of a public repo.
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED: ${{ inputs.ref }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            ref="$RELEASE_TAG"
+          elif [ -n "$REQUESTED" ]; then
+            ref="$REQUESTED"
+          else
+            ref="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          fi
+          echo "publishing $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+  # The same bar a push already has to clear -- see verify.yml, which is what actually
+  # defines "passing" for this repo, and ci.yml, which runs it more often. Calling it
+  # here rather than keeping a second copy is what stops the two from drifting apart.
+  #
+  # Pinned to the ref being published, not to the ref this workflow was launched from:
+  # a manual redeploy of an older tag has to verify *that* tag, or the green tick would
+  # belong to a different commit than the one going live.
   verify:
+    needs: resolve
     uses: ./.github/workflows/verify.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
 
   build:
-    needs: verify
+    needs: [resolve, verify]
+    # A pre-release is verified like anything else, but it does not go live -- otherwise
+    # the Pre-release checkbox is decoration, and it has already caught this repo out
+    # once (0.0.1 was marked Pre-release and published to production anyway). Only a
+    # real `release` event can be a pre-release; a manual run never is.
+    if: ${{ github.event_name != 'release' || !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # configure-pages reads the Pages configuration for this repo.
+      pages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
 
-      # An allow-list, not an exclude-list: only what is named here ever reaches the
-      # published site, so a new file added at the repo root later (a stray config, a
-      # note-to-self) is private by default instead of needing to be remembered as
-      # another exclusion.
+      # The same script ci.yml stages the Cloudflare preview with, so a preview and the
+      # live site cannot quietly become different apps -- see scripts/stage-site.mjs,
+      # which holds the allow-list of what "the site" is.
       - name: Stage the public site
-        run: |
-          mkdir _site
-          cp index.html _site/
-          cp -r src styles presets _site/
+        run: node scripts/stage-site.mjs _site
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -65,6 +117,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # pages:write is the publish itself; id-token:write is what deploy-pages uses to
+      # authenticate it.
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
