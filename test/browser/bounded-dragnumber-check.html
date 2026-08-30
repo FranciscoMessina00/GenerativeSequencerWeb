@@ -1,0 +1,153 @@
+<!doctype html>
+<!-- Checks a drag-number whose ceiling is another param's current value -- `maxFrom` in
+     the schema, Pulses bounded by Steps in the app (issue #10).
+
+     The store side of that bound is covered in Node (test/paramStore.test.js); what is
+     browser-only is the control refusing to go past the limit under a real gesture, and
+     UIController picking the limit up from the schema with no key named in the wiring.
+
+     Deliberately drives the wheel, the arrow keys and End rather than a synthetic drag:
+     bindDragAxis captures the pointer on pointerdown and a fabricated pointerId has
+     nothing to capture. All four gestures funnel through the same #commit the clamp sits
+     in, so these three cover the drag too. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>body{background:#12151a;color:#dde3ea;font:13px monospace;padding:20px;}
+#hub{display:flex;gap:12px;margin-bottom:16px;}</style>
+</head>
+<body>
+<div id="hub"></div>
+<pre id="log"></pre>
+<script type="module">
+import { EventBus } from '../../src/core/EventBus.js';
+import { DragNumber } from '../../src/ui/DragNumber.js';
+import { UIController } from '../../src/ui/UIController.js';
+import { paramSpec } from '../../src/core/paramSchema.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+
+const key = (el, k) => el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+const wheel = (el, up) => el.dispatchEvent(new WheelEvent('wheel', { deltaY: up ? -100 : 100, bubbles: true, cancelable: true }));
+
+// ---------------------------------------------------------------------------
+// A bare DragNumber with a live ceiling
+// ---------------------------------------------------------------------------
+
+log('-- the ceiling is read fresh, not captured --');
+{
+  const spec = paramSpec('pulses');
+  let ceiling = 8;
+  const emitted = [];
+  const control = new DragNumber({
+    spec,
+    format: (v) => String(v),
+    onInput: (v) => emitted.push(v),
+    limit: () => ceiling,
+  });
+  document.getElementById('hub').appendChild(control.element);
+
+  check('it starts at the schema default', control.value, spec.def);
+  check('and reports the reachable maximum, not the schema one',
+    control.element.getAttribute('aria-valuemax'), '8');
+  check('...which is below what the schema allows', spec.max > 8, true);
+
+  // Walk it up past the ceiling with the wheel. The schema would allow 32.
+  for (let i = 0; i < 40; i += 1) wheel(control.element, true);
+  check('the wheel stops at the limit', control.value, 8);
+  check('...and stopped emitting once it got there', emitted.at(-1), 8);
+
+  key(control.element, 'End');
+  check('End goes to the limit, not to the schema max', control.value, 8);
+
+  key(control.element, 'ArrowUp');
+  check('...and an arrow cannot push past it', control.value, 8);
+
+  // The floor is untouched by any of this.
+  key(control.element, 'Home');
+  check('Home still goes to the schema minimum', control.value, spec.min);
+
+  // Now the ceiling moves. Nothing announces, because the control's own value did not
+  // change -- refreshBounds is what keeps the announced maximum honest.
+  ceiling = 3;
+  check('a moved ceiling is not reflected until asked',
+    control.element.getAttribute('aria-valuemax'), '8');
+  control.refreshBounds();
+  check('refreshBounds updates it', control.element.getAttribute('aria-valuemax'), '3');
+
+  for (let i = 0; i < 20; i += 1) wheel(control.element, true);
+  check('and the new ceiling is what the gesture now hits', control.value, 3);
+
+  // A value already above a newly-lowered ceiling is pulled down the moment anything
+  // re-quantises it -- setValue is the path the store's announcement takes.
+  ceiling = 32;
+  control.setValue(20);
+  check('a raised ceiling lets it back up', control.value, 20);
+  ceiling = 5;
+  control.setValue(20);
+  check('setValue clamps to the ceiling too', control.value, 5);
+}
+
+// ---------------------------------------------------------------------------
+// UIController wires it from the schema, naming no keys
+// ---------------------------------------------------------------------------
+
+log('\n-- the wiring comes from `maxFrom`, not from a hardcoded pair --');
+{
+  const bus = new EventBus();
+  const requests = [];
+  bus.on('param:change', (e) => requests.push(e));
+
+  // A stand-in store: the two values the hub would read.
+  const values = { steps: 16, pulses: 5, rotation: 0 };
+  const ui = new UIController({ bus });
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  ui.renderDragNumbers(container, ['steps', 'pulses', 'rotation'], {
+    readValue: (k) => values[k],
+  });
+
+  const pulses = ui.dragNumbers.get('pulses');
+  const steps = ui.dragNumbers.get('steps');
+  const rotation = ui.dragNumbers.get('rotation');
+
+  check('every key rendered', ui.dragNumbers.size, 3);
+  check('the bounded one got a limit', typeof pulses.limit, 'function');
+  check('...and the unbounded ones did not', steps.limit === null && rotation.limit === null, true);
+  check('the dependency was recorded against its source',
+    ui.boundedBy.get('steps')?.[0] === pulses, true);
+
+  check('pulses reports the live ceiling', pulses.element.getAttribute('aria-valuemax'), '16');
+  for (let i = 0; i < 40; i += 1) wheel(pulses.element, true);
+  check('and stops there', pulses.value, 16);
+  check('the request that reached the bus is the clamped one', requests.at(-1).value, 16);
+
+  // Lowering the source: the store would announce steps, and UIController.setValue is
+  // where that lands. The dependent must redraw even though its own value has not been
+  // announced yet.
+  values.steps = 4;
+  ui.setValue('steps', 4);
+  check('the dependent redraws when its source is announced',
+    pulses.element.getAttribute('aria-valuemax'), '4');
+
+  // ...and the store's own truncation then arrives as a normal setValue.
+  ui.setValue('pulses', 4);
+  check('and takes the value down with it', pulses.value, 4);
+
+  requests.length = 0;
+  for (let i = 0; i < 10; i += 1) wheel(pulses.element, true);
+  check('with nothing further to give', pulses.value, 4);
+  check('...and no request emitted for a value that cannot move', requests.length, 0);
+}
+
+log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} FAILED`);
+document.title = failures === 0 ? 'bounded-dragnumber-check-done' : 'bounded-dragnumber-check-failed';
+</script>
+</body>
+</html>

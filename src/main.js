@@ -168,7 +168,11 @@ const HUB_KEYS = [...EUCLID_KEYS, 'stepDivision', 'stepMod'];
 
 const hubEl = document.getElementById('hub');
 const ui = new UIController({ bus });
-ui.renderDragNumbers(hubEl, EUCLID_KEYS);
+// `readValue` is what lets Pulses know how many Steps there are -- see `maxFrom` in
+// paramSchema.js. Read late rather than captured, so it follows the visible track.
+ui.renderDragNumbers(hubEl, EUCLID_KEYS, {
+  readValue: (key) => store.get(key, visibleTrack),
+});
 
 // The two global params, in the header beside Play. Same widget the hub uses -- a
 // tempo and an output level are magnitudes you nudge, not settings you pick.

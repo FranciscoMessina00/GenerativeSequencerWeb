@@ -44,6 +44,22 @@ export const TRACK_COUNT = 4;
 const TRACK_KEYS = PARAM_SCHEMA.filter((p) => p.scope !== 'global').map((p) => p.key);
 const GLOBAL_KEYS = PARAM_SCHEMA.filter((p) => p.scope === 'global').map((p) => p.key);
 
+/**
+ * Which params are bounded by which, from the schema's `maxFrom` -- source key to the
+ * keys that cannot exceed it.
+ *
+ * Built once, and derived rather than written down for the same reason TRACK_KEYS is:
+ * the schema is where a param's shape is declared, and a second list here would be a
+ * second place to forget.
+ */
+const DEPENDENTS = new Map();
+for (const spec of PARAM_SCHEMA) {
+  if (!spec.maxFrom) continue;
+  const list = DEPENDENTS.get(spec.maxFrom) ?? [];
+  list.push(spec.key);
+  DEPENDENTS.set(spec.maxFrom, list);
+}
+
 function defaultsForKeys(keys) {
   const out = {};
   for (const key of keys) out[key] = paramSpec(key).def;
@@ -82,11 +98,31 @@ export class ParamStore {
   }
 
   /**
+   * Apply a `maxFrom` bound, if the param declares one.
+   *
+   * Floored at the param's own minimum so a source sitting below it cannot invert the
+   * range and hand back something below `min`. A param with no `maxFrom` passes
+   * straight through, which is all but one of them.
+   */
+  #limit(spec, value, bag) {
+    if (!spec.maxFrom) return value;
+    const ceiling = bag[spec.maxFrom];
+    if (!Number.isFinite(ceiling)) return value;
+    return Math.min(value, Math.max(spec.min, ceiling));
+  }
+
+  /**
    * Normalise, store, route to the engines, then announce.
    *
    * Returns true if the value actually changed. An unchanged value is dropped
    * before routing or announcing -- that dedupe is what keeps a control's own echo
    * from travelling any further than this method.
+   *
+   * A param bounded by another (`maxFrom`) is clamped here, *before* that dedupe, so
+   * a request that lands on the value already held is dropped rather than announced
+   * as news. And changing a param that bounds others carries them down with it: see
+   * the cascade at the end, which is what makes lowering Steps truncate Pulses
+   * everywhere at once rather than only on screen.
    *
    * @param {object} [opts]
    * @param {boolean} [opts.silent] store and route without emitting `param:changed`
@@ -98,12 +134,20 @@ export class ParamStore {
     const bag = this.#bagFor(key, trackId);
     if (!bag) return false;
 
-    const next = normalizeParam(key, value);
+    const next = this.#limit(spec, normalizeParam(key, value), bag);
     if (bag[key] === next) return false;
     bag[key] = next;
 
     this.route?.(key, next, trackId, spec);
     if (!silent) this.#announce(key, next, trackId, spec);
+
+    // After the change that caused it, so a listener sees the source move first and
+    // the dependent follow -- Steps changed, and *as a consequence* Pulses did. Each
+    // is re-set to the value it already holds, which re-runs the clamp against the
+    // new source and goes no further unless it actually moved.
+    for (const dependent of DEPENDENTS.get(key) ?? []) {
+      this.set(dependent, bag[dependent], trackId, { silent });
+    }
     return true;
   }
 
@@ -184,8 +228,27 @@ export class ParamStore {
       }
     });
 
+    // Only once every value has landed. A snapshot lists its keys in whatever order
+    // the file happens to hold them, so clamping a bounded param as it arrived would
+    // measure it against the *previous* track's source value -- a patch listing
+    // `pulses` before `steps` would load differently from one listing them the other
+    // way round. syncAll() below announces the result either way.
+    this.trackValues.forEach((_, trackId) => this.#enforceLimits(trackId));
+
     this.syncAll();
     return this.#seedsFrom(snapshot);
+  }
+
+  /** Re-clamp every bounded param in one track's bag, in place and silently. */
+  #enforceLimits(trackId) {
+    const bag = this.trackValues[trackId];
+    if (!bag) return;
+    for (const keys of DEPENDENTS.values()) {
+      for (const key of keys) {
+        const spec = paramSpec(key);
+        if (spec) bag[key] = this.#limit(spec, bag[key], bag);
+      }
+    }
   }
 
   /**

@@ -106,8 +106,11 @@ export class Track {
 
   #rebuildPattern() {
     const { steps, pulses, rotation } = this.params;
-    // Both reach 32 independently, but pulses > steps degenerates to every step
-    // active, so it is capped here instead.
+    // pulses > steps degenerates to every step active. ParamStore upholds the same
+    // bound upstream now (see `maxFrom` in paramSchema.js), so in the app this cap is
+    // never the thing that catches it -- but setParam is reachable without going
+    // through the store, which is how the tests and selftest.html drive a Track, so
+    // the engine keeps its own guard.
     this.trigger.setPattern(steps, Math.min(pulses, steps), rotation);
   }
 

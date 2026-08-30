@@ -21,6 +21,13 @@ export class UIController {
     this.inputs = new Map();
     /** key -> DragNumber, for the controls rendered inside the step ring. */
     this.dragNumbers = new Map();
+    /**
+     * source key -> the drag-numbers whose ceiling follows it, from the schema's
+     * `maxFrom`. Filled by renderDragNumbers, read by setValue: when the source moves
+     * the dependents have to redraw even if their own value did not change.
+     * @type {Map<string, import('./DragNumber.js').DragNumber[]>}
+     */
+    this.boundedBy = new Map();
     /** key -> { wrapper, lo, hi, spec }, for setModRange -- range-input keys only. */
     this.modTicks = new Map();
     /**
@@ -124,14 +131,29 @@ export class UIController {
 
     const label = this.valueLabels.get(key);
     if (label) label.textContent = this.#formatValue(spec, value);
+
+    // Anything bounded by this key can now reach somewhere different, even where its
+    // own value has not moved and so will never be announced -- see DragNumber's
+    // refreshBounds.
+    for (const dependent of this.boundedBy.get(key) ?? []) dependent.refreshBounds();
   }
 
   /**
    * Render the given keys as drag-numbers, with no group chrome -- for the
    * Euclidean params inside the ring, where slider tracks would not fit and would
    * compete with the pattern itself for attention.
+   *
+   * `readValue` is only needed when one of the keys is bounded by another (`maxFrom`
+   * in the schema): the ceiling is a live value this controller has no way to read on
+   * its own, so the caller supplies the lookup. Nothing here names a param -- which
+   * key is bounded, and by what, is the schema's to say.
+   *
+   * @param {HTMLElement} container
+   * @param {string[]} keys
+   * @param {object} [opts]
+   * @param {(key: string) => number} [opts.readValue]
    */
-  renderDragNumbers(container, keys) {
+  renderDragNumbers(container, keys, { readValue } = {}) {
     for (const key of keys) {
       const spec = PARAM_SCHEMA.find((s) => s.key === key);
       if (!spec) continue;
@@ -139,8 +161,14 @@ export class UIController {
         spec,
         format: (v) => this.#formatValue(spec, v),
         onInput: (v) => this.#emit(spec.key, v),
+        limit: spec.maxFrom && readValue ? () => readValue(spec.maxFrom) : undefined,
       });
       this.dragNumbers.set(key, control);
+      if (spec.maxFrom) {
+        const list = this.boundedBy.get(spec.maxFrom) ?? [];
+        list.push(control);
+        this.boundedBy.set(spec.maxFrom, list);
+      }
       container.appendChild(control.element);
     }
   }
