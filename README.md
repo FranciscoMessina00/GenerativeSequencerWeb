@@ -381,14 +381,23 @@ and paste the result into `presets/factory.json` as another
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) publishes to GitHub
 Pages whenever a release is published — not on every push to `master`, so the site
-only moves when that is a deliberate act — or on demand from the Actions tab for a
-redeploy with no new release behind it. It runs the test suite and the type-check
-first, then stages only `index.html`, `src/`, `styles/` and
-`presets/` into the published artifact — an allow-list, so a new file dropped at the
-repo root later is private by default rather than needing to be remembered as another
-exclusion. `test/`, `types/`, `jsconfig.json` and `package.json` are never copied in,
-which keeps them off the published site; that is not the same as private — in a
-public repo they are still readable on GitHub, which is where they belong.
+only moves when that is a deliberate act — or on demand from the Actions tab. It
+verifies the exact commit it is about to publish first, then stages the site with
+[`scripts/stage-site.mjs`](scripts/stage-site.mjs), which holds the one list of what
+"the site" is: `index.html`, `src/`, `styles/` and `presets/`. An allow-list, so a new
+file dropped at the repo root later is private by default rather than needing to be
+remembered as another exclusion. `test/`, `types/`, `jsconfig.json` and `package.json`
+are never copied in, which keeps them off the published site; that is not the same as
+private — in a public repo they are still readable on GitHub, which is where they
+belong.
+
+Two things about *which* commit goes live:
+
+- **A pre-release is verified but not published.** Only a full release moves the site,
+  so the Pre-release checkbox means what it says.
+- **A manual run publishes the current release, not `master`.** Leave the `ref` input
+  blank and it redeploys whatever release is live; type a tag or a branch to override
+  that deliberately. Before this, "redeploy" silently shipped unreleased `master`.
 
 This deploys through Actions rather than the classic Jekyll build, on purpose:
 several source files carry `{{` inside JSDoc typedefs (e.g.
@@ -403,13 +412,19 @@ document-relative, so the site works unchanged under a project subpath like
 
 ### Previews
 
-[`.github/workflows/preview.yml`](.github/workflows/preview.yml) is the same idea
-aimed at a different site: every push to a branch other than `master`, and every
-pull request, stages the app the same way and deploys it to **Cloudflare Pages**
-instead of GitHub Pages — a second, separate URL that moves on every push, so a
-branch can be looked at (and heard) before it is anywhere near a release. Cloudflare
-specifically because it is HTTPS by default, which plain `http://` is not, and this
-app's audio needs a secure origin — see [Testing on a phone](#testing-on-a-phone).
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) is the same idea aimed at a
+different site: every push to a branch other than `master` is verified, staged through
+the same script, and deployed to **Cloudflare Pages** instead of GitHub Pages — a
+second, separate URL that moves on every push, so a branch can be looked at (and heard)
+before it is anywhere near a release. Cloudflare specifically because it is HTTPS by
+default, which plain `http://` is not, and this app's audio needs a secure origin —
+see [Testing on a phone](#testing-on-a-phone).
+
+`push` is the only code trigger, and one commit is one run. Adding `pull_request` back
+would double every run on a branch with an open PR — the two events fire for the same
+commit under different concurrency groups, so neither cancels the other. The trade is
+that a run checks the branch tip rather than the branch merged into `master`, and a
+fork's pull request would go unverified.
 
 Depends on two repo secrets under **Settings → Secrets and variables → Actions**:
 `CLOUDFLARE_API_TOKEN` (a token scoped to *Cloudflare Pages: Edit*, from *My
@@ -521,7 +536,7 @@ checking audio. Three ways around that, in order of how little setup they need:
 
 For anything that should be reachable without the PC running at all — a PR you
 want a second opinion on, a branch you want to check later — every push to a
-branch other than `master` (and every pull request) auto-deploys to its own
+branch other than `master` auto-deploys to its own
 Cloudflare Pages preview URL; see [Deploying](#deploying) below.
 
 ## Test

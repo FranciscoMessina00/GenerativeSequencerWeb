@@ -1,7 +1,7 @@
 # What "passing" means for this repo, as a reusable workflow -- called from both
-# ci.yml (every push and PR, nothing built or published) and deploy.yml (before a
-# release is built and deployed). One definition, so the bar a push has to clear
-# and the bar a release has to clear can never quietly drift apart.
+# ci.yml (every push, then a branch preview) and deploy.yml (before a release is
+# built and deployed). One definition, so the bar a push has to clear and the bar a
+# release has to clear can never quietly drift apart.
 #
 # `workflow_call` is the only trigger: this file never runs on its own, only when
 # another workflow in this repo references it via `uses: ./.github/workflows/verify.yml`.
@@ -9,6 +9,17 @@ name: Verify
 
 on:
   workflow_call:
+    inputs:
+      ref:
+        # Which commit to check. Blank means "whatever ref triggered the caller",
+        # which is what checkout does on its own -- so ci.yml passes nothing and is
+        # unaffected. deploy.yml passes the tag it is about to publish, because a
+        # manual redeploy of an old release must verify that release rather than
+        # verifying master and then shipping something else.
+        description: Commit-ish to verify. Blank = the ref that triggered the caller.
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -19,12 +30,21 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
 
       - name: Run tests
-        run: npm test
+        run: |
+          # test/workflows.test.js parses these workflow files to check their shape,
+          # and skips itself when js-yaml is absent so `npm test` stays green on a
+          # clean checkout. Installed here so that in CI -- the one place a workflow
+          # regression would actually matter -- those checks really run. Same ad-hoc,
+          # never-committed pattern as the typecheck and lint steps below.
+          npm install --no-save js-yaml
+          npm test
 
       - name: Type-check
         run: |
@@ -50,6 +70,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
