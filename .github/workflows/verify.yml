@@ -40,13 +40,13 @@ jobs:
   # binary rather than just a package, and it is checking a different layer --
   # the interactive controls under src/ui/, which `npm test` cannot reach at all
   # (they are DOM-heavy and have no jsdom/browser stand-in in that suite -- see
-  # test/browser/*-check.html's own header comments). Runs the 11 non-selftest
+  # test/browser/*-check.html's own header comments). Runs the 12 non-selftest
   # check pages for real in headless Chromium; selftest.html stays excluded and
   # non-gating, per its own documented raciness.
   verify-browser:
     runs-on: ubuntu-latest
     # Longer than the other job's 5 minutes: installing Chromium plus its system
-    # dependencies on a cold runner is the slow part, not the 11 quick page checks.
+    # dependencies on a cold runner is the slow part, not the 12 quick page checks.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

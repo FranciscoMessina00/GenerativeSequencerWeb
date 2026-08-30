@@ -26,12 +26,17 @@ export class DragNumber {
    * @param {(value: number) => void} opts.onInput
    * @param {(value: number) => string} [opts.describe] spoken form for aria-valuetext;
    *   defaults to `format`, and worth passing where the visible text drops the unit
+   * @param {() => number} [opts.limit] a live ceiling below `spec.max`, read fresh on
+   *   every gesture -- for a param bounded by another one's current value. See
+   *   `maxFrom` in core/paramSchema.js, and UIController.renderDragNumbers, which is
+   *   what wires this up from the schema.
    */
-  constructor({ spec, format, onInput, describe }) {
+  constructor({ spec, format, onInput, describe, limit }) {
     this.spec = spec;
     this.format = format;
     this.describe = describe ?? format;
     this.onInput = onInput;
+    this.limit = limit ?? null;
     this.value = spec.def;
     /** Set through setDisabled -- see there for what it does and does not stop. */
     this.disabled = false;
@@ -66,9 +71,25 @@ export class DragNumber {
     this.#bind();
   }
 
+  /**
+   * The highest value reachable right now -- the schema's ceiling, or a live `limit`
+   * below it. Read on every use rather than cached: what it depends on is another
+   * param's current value, which moves.
+   *
+   * Deliberately NOT used to scale the drag: `onDragMove` keeps calibrating its sweep
+   * to the schema's full range, so the same hand movement always means the same number
+   * of steps and only the value stops early. A sweep that rescaled itself would make
+   * the control's sensitivity depend on a number somewhere else on the page.
+   */
+  #max() {
+    if (!this.limit) return this.spec.max;
+    const live = Number(this.limit());
+    return Number.isFinite(live) ? Math.min(this.spec.max, live) : this.spec.max;
+  }
+
   #quantize(raw) {
     if (this.values) return this.#nearest(raw);
-    return quantize(raw, this.spec.min, this.spec.max, this.spec.step);
+    return quantize(raw, this.spec.min, this.#max(), this.spec.step);
   }
 
   /** Closest member of an enumerated list; ties resolve downward. */
@@ -94,13 +115,25 @@ export class DragNumber {
     this.valueEl.textContent = this.format(this.value);
     this.element.setAttribute('aria-valuenow', String(this.value));
     this.element.setAttribute('aria-valuemin', String(this.spec.min));
-    this.element.setAttribute('aria-valuemax', String(this.spec.max));
+    // What can actually be reached, not what the schema would allow in principle.
+    this.element.setAttribute('aria-valuemax', String(this.#max()));
     this.element.setAttribute('aria-valuetext', this.describe(this.value));
   }
 
   /** Set from outside without firing onInput -- used to reflect external changes. */
   setValue(next) {
     this.value = this.#quantize(next);
+    this.#render();
+  }
+
+  /**
+   * Redraw because the *ceiling* moved, not the value.
+   *
+   * Lowering Steps from 16 to 8 with Pulses at 3 changes what Pulses can reach without
+   * changing what it is set to, so nothing announces and nothing would otherwise
+   * re-render -- leaving `aria-valuemax` describing a maximum that is no longer there.
+   */
+  refreshBounds() {
     this.#render();
   }
 
@@ -172,7 +205,7 @@ export class DragNumber {
       onDblClick: () => this.#commit(this.spec.def),
       onKeyNudge: (steps) => this.#nudge(steps),
       onHome: () => this.#commit(this.values ? this.values[0] : this.spec.min),
-      onEnd: () => this.#commit(this.values ? this.values[this.values.length - 1] : this.spec.max),
+      onEnd: () => this.#commit(this.values ? this.values[this.values.length - 1] : this.#max()),
     });
   }
 }

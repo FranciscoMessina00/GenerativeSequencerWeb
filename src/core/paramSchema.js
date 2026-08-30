@@ -28,7 +28,13 @@ export const PARAM_SCHEMA = [
   // supplies the noun -- inside the step ring the panel already says "Euclid", so
   // repeating it three times only costs space.
   { key: 'steps', label: 'Euclid Steps', short: 'Steps', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 16 },
-  { key: 'pulses', label: 'Euclid Triggers', short: 'Pulses', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 5 },
+  // `maxFrom` narrows the ceiling to whatever another param currently holds: more
+  // pulses than there are steps to put them in is a number that cannot mean anything,
+  // and the pattern builder has always capped it silently -- so the control used to
+  // read 20 while the rhythm played 16. `max` stays as the absolute bound; maxFrom is
+  // the live one. Enforced by ParamStore, not by clampParam below: a cross-parameter
+  // bound needs the sibling's current value, and only a bag of values has that.
+  { key: 'pulses', label: 'Euclid Triggers', short: 'Pulses', group: 'Rhythm', target: 'track', min: 1, max: 32, step: 1, def: 5, maxFrom: 'steps' },
   { key: 'rotation', label: 'Euclid Rotation', short: 'Rotation', group: 'Rhythm', target: 'track', min: 0, max: 32, step: 1, def: 0 },
   // How long one step lasts, as a note value -- see sequencer/stepDivision.js.
   //

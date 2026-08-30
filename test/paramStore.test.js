@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventBus } from '../src/core/EventBus.js';
 import { ParamStore } from '../src/core/ParamStore.js';
-import { normalizeParam, paramSpec } from '../src/core/paramSchema.js';
+import { PARAM_SCHEMA, normalizeParam, paramSpec } from '../src/core/paramSchema.js';
 
 function harness({ trackCount = 1 } = {}) {
   const bus = new EventBus();
@@ -142,4 +142,142 @@ test('syncAll re-routes every held value, including unchanged ones', () => {
 
   // And it reports values, not undefined.
   assert.ok(routed.every((r) => r.value !== undefined));
+});
+
+// ---------------------------------------------------------------------------
+// Cross-parameter bounds: `maxFrom` (issue #10 -- Pulses cannot exceed Steps)
+// ---------------------------------------------------------------------------
+
+test('a bounded param is clamped to the one that bounds it', () => {
+  const { store, announced } = harness();
+  store.set('steps', 8);
+  announced.length = 0;
+
+  // The control could ask for 20; there are only 8 slots to put pulses in.
+  assert.equal(store.set('pulses', 20), true);
+  assert.equal(store.get('pulses'), 8);
+  // And what is announced is the clamped value, not what was asked for -- otherwise
+  // the control would redraw itself at 20 and disagree with the store.
+  assert.deepEqual(announced, [{ trackId: 0, key: 'pulses', value: 8, global: false }]);
+});
+
+test('lowering the source truncates what it bounds, and says so', () => {
+  const { store, routed, announced } = harness();
+  store.set('pulses', 12);
+  routed.length = 0;
+  announced.length = 0;
+
+  store.set('steps', 4);
+
+  assert.equal(store.get('pulses'), 4, 'twelve pulses cannot fit four steps');
+  // Both reach the engines and both are announced -- the source first, then what
+  // followed from it.
+  assert.deepEqual(routed, [
+    { key: 'steps', value: 4, trackId: 0 },
+    { key: 'pulses', value: 4, trackId: 0 },
+  ]);
+  assert.deepEqual(announced.map((e) => e.key), ['steps', 'pulses']);
+  assert.deepEqual(announced.map((e) => e.value), [4, 4]);
+});
+
+test('raising the source again does not put back what was truncated', () => {
+  // Truncation loses the old value, which is what issue #10 asks for -- restoring it
+  // would mean the store remembering a number the user can no longer see.
+  const { store } = harness();
+  store.set('pulses', 12);
+  store.set('steps', 4);
+  store.set('steps', 16);
+  assert.equal(store.get('pulses'), 4);
+});
+
+test('a source change that takes nothing away announces only itself', () => {
+  const { store, announced } = harness();
+  store.set('pulses', 3);
+  announced.length = 0;
+
+  store.set('steps', 8); // still room for three pulses
+  assert.deepEqual(announced.map((e) => e.key), ['steps']);
+  assert.equal(store.get('pulses'), 3);
+});
+
+test('a request that clamps onto the value already held is dropped', () => {
+  const { store, routed, announced } = harness();
+  store.set('steps', 8);
+  store.set('pulses', 20); // clamps to 8
+  routed.length = 0;
+  announced.length = 0;
+
+  // 25 clamps to 8 as well, which is what is already there. It is not news.
+  assert.equal(store.set('pulses', 25), false);
+  assert.deepEqual(routed, []);
+  assert.deepEqual(announced, []);
+});
+
+test('the bound is per track, like the values it reads', () => {
+  const { store } = harness({ trackCount: 2 });
+  store.set('steps', 4, 0);
+  store.set('steps', 32, 1);
+
+  store.set('pulses', 30, 0);
+  store.set('pulses', 30, 1);
+
+  assert.equal(store.get('pulses', 0), 4);
+  assert.equal(store.get('pulses', 1), 30);
+});
+
+test('a snapshot cannot carry more pulses than steps, whatever order it lists them', () => {
+  // Object key order is whatever the file happens to hold, so clamping as each value
+  // landed would measure pulses against the *previous* steps.
+  for (const bag of [{ steps: 8, pulses: 30 }, { pulses: 30, steps: 8 }]) {
+    const { store } = harness();
+    store.load({ version: 2, seeds: [1], global: {}, tracks: [bag] });
+    assert.equal(store.get('steps'), 8, JSON.stringify(bag));
+    assert.equal(store.get('pulses'), 8, JSON.stringify(bag));
+  }
+});
+
+test('loading announces the truncated value, so the controls agree with it', () => {
+  const { store, announced } = harness();
+  store.load({ version: 2, seeds: [1], global: {}, tracks: [{ pulses: 30, steps: 8 }] });
+  const pulses = announced.filter((e) => e.key === 'pulses');
+  assert.equal(pulses.length, 1);
+  assert.equal(pulses[0].value, 8);
+});
+
+test('a snapshot round-trips through the bound unchanged', () => {
+  const { store } = harness();
+  store.set('steps', 12);
+  store.set('pulses', 12);
+  const snap = store.snapshot([7]);
+
+  const fresh = harness().store;
+  fresh.load(snap);
+  assert.equal(fresh.get('steps'), 12);
+  assert.equal(fresh.get('pulses'), 12, 'a value already at its ceiling must survive');
+});
+
+test('every maxFrom names a real param it can actually be measured against', () => {
+  for (const spec of PARAM_SCHEMA) {
+    if (!spec.maxFrom) continue;
+    const source = paramSpec(spec.maxFrom);
+    assert.ok(source, `${spec.key} is bounded by ${spec.maxFrom}, which does not exist`);
+    assert.equal(source.scope, spec.scope, `${spec.key} and ${spec.maxFrom} must share a scope`);
+    assert.equal(source.type, undefined, `${spec.maxFrom} must be numeric to bound anything`);
+    assert.ok(Number.isFinite(source.def), `${spec.maxFrom} needs a numeric default`);
+  }
+});
+
+test('the maxFrom graph is acyclic, or the cascade would never return', () => {
+  // set() re-sets every dependent of the key it just wrote, and those cascade in turn.
+  // A cycle would recurse until the stack gave out, so it is worth failing here rather
+  // than on the first drag that happens to trip it.
+  for (const spec of PARAM_SCHEMA) {
+    const seen = new Set();
+    let at = spec;
+    while (at?.maxFrom) {
+      assert.ok(!seen.has(at.key), `${spec.key} sits on a maxFrom cycle`);
+      seen.add(at.key);
+      at = paramSpec(at.maxFrom);
+    }
+  }
 });

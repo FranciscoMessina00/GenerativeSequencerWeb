@@ -109,7 +109,7 @@ test('loading announces every param, so the whole UI can follow', () => {
 test('unknown keys are ignored and missing ones keep their current value', () => {
   const { store } = harness();
   store.set('bpm', 111);
-  store.set('pulses', 9, 0);
+  store.set('rotation', 9, 0);
 
   const seeds = store.load({
     version: 1,
@@ -124,8 +124,22 @@ test('unknown keys are ignored and missing ones keep their current value', () =>
   assert.equal(store.get('steps'), 5);
   // Absent from a bag that IS present, so it survives untouched -- unlike a whole
   // missing bag, which resets. See the next test.
-  assert.equal(store.get('pulses'), 9);
+  assert.equal(store.get('rotation'), 9);
   assert.equal(store.get('somethingRemovedLater'), undefined);
+});
+
+test('a surviving value still cannot outrun a bound the snapshot moved under it', () => {
+  // The exception to the rule above, and it has to be one: `pulses` survives a bag
+  // that does not mention it, but the same load drops `steps` to 5 -- so keeping 9
+  // would leave the store holding a number that cannot mean anything. See `maxFrom`
+  // in paramSchema.js.
+  const { store } = harness();
+  store.set('pulses', 9, 0);
+
+  store.load({ version: 2, seeds: [8], global: {}, tracks: [{ steps: 5 }] });
+
+  assert.equal(store.get('steps'), 5);
+  assert.equal(store.get('pulses'), 5);
 });
 
 test('a track the snapshot says nothing about is reset, not left playing', () => {
