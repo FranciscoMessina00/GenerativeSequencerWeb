@@ -5,57 +5,110 @@ clock, built on the **Web Audio API**.
 
 > Zero build step, plain ES modules, no dependencies.
 
+## What this is
+
+A four-channel generative sequencer that runs in a browser tab, with nothing to install
+and nothing to build. You do not place notes in it. Each channel derives its rhythm from
+a Euclidean pattern, draws pitches and velocities from distributions you shape rather
+than values you enter, and plays the result through a physically modelled string or a
+drum voice. Everything is set by dragging numbers, rings and sliders, and a guided tour
+walks a first-time visitor from a silent page to a sound they chose.
+
+## Why it exists
+
+Two reasons, and shipping a product is not one of them.
+
+The first is that most of the ideas here are old. Euclidean rhythms, logic-gated
+triggers, frozen loops of captured randomness, modal synthesis: much of it comes from
+hardware and tracker software that is out of production, expensive, or was never widely
+used to begin with. Rebuilding it on the Web Audio API puts it back within reach of
+anyone with a link.
+
+The second, and the real one, is that the interesting problem in a generative instrument
+is the *interface*, not the engine. What should a control look like when it sets a range
+instead of a value? How do you draw a pattern that is partly random without misleading
+someone about what will happen next? How much can a person be told in a single line of
+hover text, and how does someone who has never used a sequencer get their bearings at
+all? Those questions are what this is a workbench for, so the effort goes into the
+control surface, the feedback, and the tour.
+
+That focus has a cost, and it is deliberate. This is **not** tuned for real-time
+efficiency or feature completeness. There is no MIDI, no recording, no plugin build, and
+the audio path allocates more freely than a serious engine would. Wherever clarity and
+throughput have pulled against each other, clarity has won.
+
 ## Architecture
 
 The system is event-driven and fully decoupled through a synchronous pub/sub bus:
 
 ```
 index.html
-  └─ src/main.js              ← Wiring & bootstrap
-        ├─ core/               ← Infrastructure
-        │   ├─ EventBus.js     ←   Pub/sub event system
-        │   ├─ rng.js          ←   Seedable PRNG (mulberry32)
-        │   ├─ paramSchema.js  ←   Declarative parameter definitions
-        │   ├─ ParamStore.js   ←   Authoritative parameter state
-        │   └─ presets.js      ←   Factory patch loading
+  └─ src/main.js                    ← Wiring & bootstrap
+        ├─ core/                     ← Infrastructure
+        │   ├─ EventBus.js           ←   Pub/sub event system
+        │   ├─ rng.js                ←   Seedable PRNG (mulberry32)
+        │   ├─ paramSchema.js        ←   Declarative parameter definitions
+        │   ├─ ParamStore.js         ←   Authoritative parameter state
+        │   ├─ bootDefaults.js       ←   What the four tracks differ by at boot
+        │   ├─ numberUtils.js        ←   Clamping and rounding (pure)
+        │   └─ presets.js            ←   Factory patch loading
         │
-        ├─ sequencer/           ← Sequencing engine
-        │   ├─ Scheduler.js    ←   Lookahead audio clock scheduler
-        │   ├─ Ticker.js       ←   Web Worker timer (background-safe)
-        │   ├─ Track.js        ←   One sequencer channel
-        │   ├─ HistoryBuffer.js←   32-slot shift register
-        │   ├─ euclid.js       ←   Euclidean rhythm generator
-        │   ├─ logic.js        ←   OR/AND/XOR/NAND logic operators
-        │   ├─ permute.js      ←   Lehmer code permutation
-        │   ├─ scales.js       ←   10 musical scales + quantisation
-        │   ├─ stepDivision.js←   Note values + triplet/dotted
+        ├─ sequencer/                ← Sequencing engine
+        │   ├─ Scheduler.js          ←   Lookahead audio clock scheduler
+        │   ├─ Ticker.js             ←   Web Worker timer (background-safe)
+        │   ├─ Track.js              ←   One sequencer channel
+        │   ├─ HistoryBuffer.js      ←   32-slot shift register
+        │   ├─ euclid.js             ←   Euclidean rhythm generator
+        │   ├─ logic.js              ←   OR/AND/XOR/NAND logic operators
+        │   ├─ permute.js            ←   Lehmer code permutation
+        │   ├─ scales.js             ←   10 musical scales + quantisation
+        │   ├─ stepDivision.js       ←   Note values + triplet/dotted
         │   └─ generators/
         │       ├─ TriggerGenerator.js  ← Rhythm generation
         │       ├─ ValueGenerator.js    ← Note/velocity/modulation
         │       └─ distributions.js     ← Stochastic distributions
         │
-        ├─ audio/               ← Audio rendering
-        │   ├─ AudioEngine.js  ←   AudioContext, master limiter & fader
-        │   ├─ instruments.js  ←   The registry: id → processor, group, note-on
-        │   ├─ TrackVoice.js   ←   One track's instrument + granulator + trim
+        ├─ modulation/               ← The LFO and where it points
+        │   ├─ lfo.js                ←   Shape, fold and phase (pure)
+        │   ├─ Modulation.js         ←   Per-track LFO, sampled once a step
+        │   ├─ modTargets.js         ←   Append-only index → param key
+        │   └─ modRange.js           ←   The reach it draws on its target (pure)
+        │
+        ├─ audio/                    ← Audio rendering
+        │   ├─ AudioEngine.js        ←   AudioContext, master limiter & fader
+        │   ├─ instruments.js        ←   The registry: id → processor, group, note-on
+        │   ├─ TrackVoice.js         ←   One track's instrument + granulator + trim
+        │   ├─ envelope.js           ←   Attack/hold/decay shape (pure)
         │   ├─ modal/
-        │   │   └─ modalModel.js ←  String physics (pure functions)
+        │   │   └─ modalModel.js     ←   String physics (pure functions)
         │   ├─ percussion/
-        │   │   └─ percussionModel.js ← Kick/snare/hat mappings (pure)
+        │   │   └─ percussionModel.js ←  Kick/snare/hat mappings (pure)
         │   └─ worklets/
         │       ├─ modal-processor.js    ← 16-voice resonator bank
         │       ├─ percussion-processors.js ← Kick, snare and hi-hat
         │       ├─ granulator-processor.js ← Live granulator + limiter
         │       └─ master-clip-processor.js ← Limiter on the four-track sum
         │
-        └─ ui/                  ← User interface
-            ├─ UIController.js ←   Builds control surface from schema
-            ├─ EuclidView.js   ←   Canvas Euclidean ring display
-            ├─ TrackTabs.js    ←   The four track pages + playhead bars
-            ├─ InstrumentPanel.js ← Which instrument's controls are showing
-            ├─ palette.js      ←   One colour scheme per page
-            ├─ playheadProgress.js ← Fractional playhead position (pure)
-            ├─ icons.js        ←   Line-art SVG glyphs
+        └─ ui/                       ← User interface
+            ├─ UIController.js       ←   Builds control surface from schema
+            ├─ EuclidView.js         ←   Canvas Euclidean ring display
+            ├─ TrackTabs.js          ←   The four track pages + playhead bars
+            ├─ InstrumentPanel.js    ←   Which instrument's controls are showing
+            ├─ EnvelopePanel.js      ←   The envelope's controls...
+            ├─ EnvelopeView.js       ←   ...and its canvas
+            ├─ LfoPanel.js           ←   The LFO's controls...
+            ├─ LfoView.js            ←   ...and its canvas
+            ├─ InfoBar.js            ←   The footer that labels whatever is hovered
+            ├─ infoText.js           ←   One line per control, as data
+            ├─ TutorialOverlay.js    ←   The guided tour's spotlight and card
+            ├─ tutorialSteps.js      ←   The tour's cards, as data
+            ├─ ScrollIndicator.js    ←   Off-screen content hint
+            ├─ palette.js            ←   One colour scheme per page
+            ├─ playheadProgress.js   ←   Fractional playhead position (pure)
+            ├─ envelopeShape.js      ←   Envelope drawing geometry (pure)
+            ├─ scrollThumb.js        ←   Scroll thumb geometry (pure)
+            ├─ dragGesture.js        ←   Shared pointer-drag behaviour
+            ├─ icons.js              ←   Line-art SVG glyphs
             ├─ BiasSpreadSlider.js
             ├─ DragNumber.js
             ├─ Dropdown.js
@@ -494,8 +547,9 @@ is why the string has one length dial rather than two.
 |-----------|---------|
 | `src/core/` | Event bus, PRNG, parameter schema |
 | `src/sequencer/` | Clock scheduling, track generators, rhythm & pitch logic |
+| `src/modulation/` | Per-track LFO, its target table, and the reach it draws |
 | `src/audio/` | AudioContext management, modal string model, AudioWorklets |
-| `src/ui/` | Canvas GUI, custom controls (sliders, drag-numbers, icon controls) |
+| `src/ui/` | Canvas GUI, custom controls, info bar, guided tour |
 | `presets/` | Factory patches, fetched at startup |
 | `test/` | Node.js native test suite |
 | `styles/` | Application CSS |
@@ -542,13 +596,22 @@ Cloudflare Pages preview URL; see [Deploying](#deploying) below.
 ## Test
 
 ```bash
-npm test         # Node native test runner, 262 tests, no dependencies
+npm test         # Node native test runner, 422 tests, no dependencies
 ```
 
 The custom controls need a DOM, so they are checked by mounted pages rather than in Node.
 Serve the project root and open any of `/test/browser/*-check.html` — the rhythm glyphs,
-the LFO panel, the track tabs, the ring's loop overlay, and so on. Each prints its
-results and stops on `ALL CHECKS DONE`.
+the LFO panel, the track tabs, the ring's loop overlay, the guided tour, and so on. Each
+prints its results and stops on `ALL CHECKS DONE`.
+
+Those same pages run headlessly, which is what CI gates on:
+
+```bash
+npm run test:browser   # serves the project, drives all 13 pages in Chromium
+```
+
+It needs Playwright first (`npm i -D playwright && npx playwright install chromium`),
+which is why it is a separate command rather than part of `npm test`.
 
 Two things in the multi-track work are deliberately Node-testable rather than
 browser-only, because they are where the off-by-ones live:
