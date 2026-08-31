@@ -138,6 +138,7 @@ export const INFO_TEXT = {
   play: 'Play / Stop — start or stop the sequencer. Space does the same.',
   pluck: 'Pluck Once — play a single note without running the sequence.',
   reseed: 'Reseed — new random seed, so the generators take a different path.',
+  tutorial: 'Tutorial — a guided tour of the whole instrument. It changes settings as it goes, and leaves them changed.',
   presetSlots: 'Patch — pick one of the factory patches to load.',
   presetLoad: 'Load — apply the selected patch, including its random seed.',
   presetExport: 'Export — download the current patch as JSON, ready to paste into presets/factory.json.',

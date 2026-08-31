@@ -92,6 +92,11 @@ export class UIController {
 
       const section = document.createElement('section');
       section.className = 'group';
+      // Which group this is, as a selector anything outside can address. The tutorial
+      // spotlights a whole instrument panel by name (`.group[data-group="String"]`)
+      // rather than guessing at one of its child controls, which would move the moment
+      // the panel's contents were reordered.
+      section.dataset.group = group;
 
       const heading = document.createElement('h2');
       heading.textContent = group;

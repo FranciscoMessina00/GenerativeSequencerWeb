@@ -27,6 +27,7 @@ const NON_PARAM_IDS = new Set([
   'presetExport',
   'ring',
   'trackTab',
+  'tutorial',
 ]);
 
 /** Long enough for a clause, short enough that the footer stays glanceable. */

@@ -85,6 +85,14 @@
   --playing: #2c4a3a;
   --playing: color-mix(in srgb, var(--accent-2) 26%, var(--base-well));
 
+  /* The tutorial's dim, laid over everything except the one control a card is
+     describing. Dark enough that the lit control is unmistakably the subject, light
+     enough that the page behind still reads as the page -- the ring has to be
+     watchable while a card talks about it. Deliberately not per page and written as
+     a flat rgba rather than a mix: this is the absence of light, and absence has no
+     hue, the same reasoning as --rest below. */
+  --dim: rgba(6, 8, 11, 0.72);
+
   /* Written by palette.js so the canvas and the legend swatches cannot drift --
      they had, as #4a90b8 in EuclidView versus #4a90b8 in .swatch.pulse. The values
      here are page 1's, for the no-JS case. */
@@ -148,7 +156,10 @@ h1 { font-size: 15px; margin: 0; font-weight: 600; }
 h1 .sub { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 6px; }
 .status { margin: 2px 0 0; color: var(--muted); font: 11px ui-monospace, monospace; }
 
-.transport { display: flex; gap: 8px; align-items: center; }
+/* Wraps rather than overflows. A no-op at every width where the row fits, which is
+   every desktop one; it earns its keep on a 320px phone, where the two drag-numbers
+   and four buttons cannot share a line. */
+.transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* Tempo and master, before the buttons. A separator rather than extra gap, because
    they are a different kind of thing from Play: two values you set against three
@@ -1850,3 +1861,171 @@ input[type="range"]::-moz-range-thumb {
     flex-wrap: wrap;
   }
 }
+
+/* ---- tutorial: the guided tour ---- */
+
+/* The dim is four panels tiled around the target rather than one scrim with a hole
+   punched in it, and that is not a stylistic preference -- see the header comment in
+   src/ui/TutorialOverlay.js. header, .infobar and .scrollind are each their own
+   stacking context at z-index 10, so a target lifted above a single scrim would stay
+   trapped inside its ancestor's context and paint underneath it anyway. With four
+   panels nothing is ever drawn over the target, so it needs no z-index of its own and
+   stays live at whatever depth it already sat.
+
+   The container itself paints nothing and catches nothing; every piece below is
+   positioned against the viewport in its own right, and TutorialOverlay writes all
+   four edges of each from measured pixels. */
+.tutorial {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+/* Where the page goes inert. The panels take pointer events and swallow them, so
+   while a card is up the only control that answers is the one in the hole. */
+.tutorial__mask {
+  position: fixed;
+  background: var(--dim);
+  pointer-events: auto;
+  z-index: 40;
+}
+
+/* ...except while a mapping gesture is in flight. The LFO card tells the reader to
+   press Map and then click any control that lights up, and "any control" is mostly
+   outside the hole, so the panels have to stand down or the card is asking for
+   something the overlay itself is preventing. The dim stays, both as the look of the
+   tour and because assign mode lights its own targets on top of it; only the swallowing
+   stops. main.js puts the class on for exactly as long as assign mode is on, and
+   clears it on Escape, on the bound click, and when the tour is opened. */
+body.is-assigning .tutorial__mask {
+  pointer-events: none;
+}
+
+/* Decoration, so it must never be the event target -- the hole is empty on purpose
+   and a click there belongs to whatever is underneath. Two shadows: a hard edge that
+   survives against any background, and a soft glow that reads as light rather than as
+   a border. */
+.tutorial__ring {
+  position: fixed;
+  z-index: 41;
+  pointer-events: none;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--accent-85), 0 0 22px 4px var(--accent-45);
+}
+
+.tutorial__card {
+  position: fixed;
+  z-index: 42;
+  pointer-events: auto;
+  /* Wide enough for four lines of copy, and never wider than a phone. */
+  width: min(360px, calc(100vw - 28px));
+  /* ...and never so tall that the control it is describing has nowhere left to be.
+     On a short screen the copy scrolls inside the card instead, which is the right
+     trade: a card that has to be scrolled is still readable, whereas a spotlight with
+     no room to open is just a dimmed page. TutorialOverlay measures offsetHeight, so
+     the cap feeds straight into where it decides the card can sit. */
+  max-height: 52vh;
+  overflow-y: auto;
+  padding: 13px 15px 14px;
+  background: var(--panel);
+  border: 1px solid var(--accent-28);
+  border-radius: 8px;
+  /* Lifted off the dim: without a shadow the panel fill and the dimmed page behind
+     it are close enough in value that the card's edges disappear. */
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+}
+.tutorial__card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.tutorial__head { display: flex; align-items: center; gap: 8px; }
+
+/* The house voice for a heading that names a section -- matching .group h2. */
+.tutorial__chapter {
+  color: var(--accent);
+  font: 600 10px/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Pushed to the far end, and in the machine-text voice .status and #readout use. */
+.tutorial__count {
+  margin-left: auto;
+  color: var(--muted);
+  font: 11px/1 ui-monospace, monospace;
+}
+
+/* Overrides the global button padding, which would make a 30px box out of a glyph.
+   Same treatment as .lfo__clear, which is the other bare-glyph button here. */
+.tutorial__close {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tutorial__close:hover,
+.tutorial__close:focus-visible {
+  background: var(--accent-16);
+  color: var(--text);
+  outline: none;
+}
+
+.tutorial__title { margin: 9px 0 6px; font-size: 14px; font-weight: 600; }
+
+/* Looser than the rest of the instrument. Everything else on this page is a caption
+   read mid-gesture; this is prose, and several sentences of it. */
+.tutorial__body {
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.tutorial__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* Quiet, and pushed away from Back/Next: leaving a chapter is a different kind of
+   decision from stepping through one. */
+.tutorial__skip {
+  margin-right: auto;
+  padding: 5px 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+.tutorial__skip:hover { color: var(--text); border-color: transparent; }
+
+.tutorial__back,
+.tutorial__next { padding: 6px 12px; }
+.tutorial__next { min-width: 74px; }
+/* Back on the first card. Kept in place rather than hidden, so the row does not
+   reflow between card one and card two. */
+.tutorial__back:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.tutorial__back:disabled:hover { border-color: var(--line); }
+
+/* The opening and closing cards point at nothing. The dim is uniform and the card is
+   centred on it, so it reads as an ordinary dialog rather than as a spotlight aimed
+   at empty space. Slightly wider, because those two cards carry the most copy. */
+.tutorial--no-target .tutorial__card { width: min(430px, calc(100vw - 28px)); }
+
+/* Deliberately NOT transitioned, unlike almost everything else here.
+   TutorialOverlay repositions these on every scroll event, so an eased hole spends
+   the whole of a scroll ~180ms behind the control it is supposed to be drawn around
+   -- and, because the card is repositioned in the same frame without easing, the two
+   briefly overlap on the way. The movement that carries the eye from one card to the
+   next is the page scrolling underneath, which is smooth already and drops to instant
+   under prefers-reduced-motion; the hole's job is only ever to be exactly on the
+   target, on every frame. */

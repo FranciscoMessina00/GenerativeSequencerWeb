@@ -25,6 +25,8 @@ import { InstrumentPanel } from './ui/InstrumentPanel.js';
 import { INSTRUMENT_GROUPS } from './audio/instruments.js';
 import { InfoBar } from './ui/InfoBar.js';
 import { ScrollIndicator } from './ui/ScrollIndicator.js';
+import { TutorialOverlay } from './ui/TutorialOverlay.js';
+import { TUTORIAL_STEPS } from './ui/tutorialSteps.js';
 import { applyPalette, paletteFor } from './ui/palette.js';
 import { Modulation } from './modulation/Modulation.js';
 import { MOD_TARGETS } from './modulation/modTargets.js';
@@ -591,6 +593,13 @@ let assigning = false;
 function setAssignMode(next) {
   assigning = next;
   lfoPanel.setAssigning(assigning);
+  // Also on the body, because one thing outside this loop has to know: the tutorial's
+  // dim panels cover the page and swallow pointer events, which is what makes the rest
+  // of the page inert while a card is up. That is right for every card except the one
+  // telling the reader to press Map and click a control -- it left Map working and the
+  // controls unclickable. The panels stand down for the length of the gesture; see the
+  // rule in styles/main.css.
+  document.body.classList.toggle('is-assigning', assigning);
   for (const el of document.querySelectorAll('[data-info]')) {
     el.classList.toggle('is-mod-eligible', assigning && Boolean(targetKeyOf(el)));
   }
@@ -932,6 +941,62 @@ envelopePanel.setPalette(bootPalette);
 // and the controls have to be there to hear them.
 applyBootDefaults(store);
 
+// ---------------------------------------------------------------------------
+// Guided tour
+// ---------------------------------------------------------------------------
+
+// The tour drives the instrument rather than describing it: every card dials a real
+// setting in so the reader hears what is being explained. It reaches the controls the
+// only way anything here does -- by asking. See ui/tutorialSteps.js for the cards and
+// ui/TutorialOverlay.js for how one of them is put on screen.
+//
+// Built last, and given its side effects as callbacks rather than a handle on this
+// module, so nothing about the tour can bypass the store or the scheduler.
+const tutorialButton = document.getElementById('tutorial');
+const tutorial = new TutorialOverlay({
+  steps: TUTORIAL_STEPS,
+  // Exactly what a control emits when it is dragged, so a card's change is committed,
+  // routed and announced identically -- which is what moves the on-screen controls to
+  // match, with nothing here having to know they exist.
+  setParam: (key, value, trackId) => bus.emit('param:change', { trackId, key, value }),
+  selectTrack,
+  start: async () => {
+    await ensureAudio();
+    // start(), never toggle(): it is already idempotent, and a toggle would *stop* the
+    // sequence for anyone who pressed Play before opening the tour.
+    scheduler.start();
+  },
+  // The space bar, routed through the header button so the label, the pressed state
+  // and the audio bootstrap all stay in one place. The page's own space handler cannot
+  // serve the tour: it fires only when the body has focus, and while a card is up the
+  // card has it.
+  toggleTransport: () => playButton.click(),
+  // Staging, run once per opening. The tour's first three chapters are written about
+  // one voice on one page -- "the circle is the sequence", not "one of the four
+  // circles" -- so opening it with the drums running and track 3 on screen makes the
+  // copy wrong from card 2. Mute is per-track and reversible, and the Channels chapter
+  // is what turns the others back on, so this costs the reader nothing they cannot
+  // undo with one click on a tab.
+  //
+  // Note what this deliberately does NOT touch: any generator setting. Silencing a
+  // channel is staging; flattening the rhythm someone built is not, which is why the
+  // Play card no longer writes a baseline pattern.
+  onOpen: () => {
+    for (let id = 0; id < TRACK_COUNT; id += 1) {
+      bus.emit('param:change', { trackId: id, key: 'mute', value: id !== 0 });
+    }
+    selectTrack(0);
+  },
+  anchor: tutorialButton,
+});
+
+tutorialButton.addEventListener('click', () => {
+  // A half-finished mapping gesture cannot survive the page being taken over, and the
+  // dashed outlines it leaves on every eligible control would fight the spotlight.
+  setAssignMode(false);
+  tutorial.open();
+});
+
 // Console handle. Module bindings are not reachable from the devtools console, and
 // poking a generative instrument by hand is genuinely useful:
 //
@@ -945,5 +1010,5 @@ applyBootDefaults(store);
 //   __seq.presets.toJSON({ name: '...', patch: __seq.store.snapshot(__seq.rngs.map((r) => r.seed)) })
 /** @type {any} */ (window).__seq = {
   bus, store, tracks, rngs, audio, scheduler, presets, applySnapshot, modulations,
-  selectTrack, tabs, paletteFor, get visibleTrack() { return visibleTrack; },
+  selectTrack, tabs, paletteFor, tutorial, get visibleTrack() { return visibleTrack; },
 };

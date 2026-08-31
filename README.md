@@ -377,6 +377,59 @@ __seq.presets.toJSON(__seq.store.snapshot(__seq.rngs.map((r) => r.seed)))
 and paste the result into `presets/factory.json` as another
 `{ "name": "...", "patch": { ... } }` entry.
 
+## Tutorial
+
+The **Tutorial** button in the header runs a guided tour: 24 cards in four chapters,
+which dim the page down to one control at a time and explain it. It starts on track 1
+with the string — the rhythm, then the pitch, then the sound of one note — and only
+then widens to the other three channels.
+
+It **drives the instrument rather than describing it**. Each card writes real
+parameters, so the reader hears what is being explained as they read it, and the
+spotlit control stays live so they can push it further without leaving the card.
+Those settings are kept when the tour closes; the opening card says so and names
+Patch → Load as the way back to a finished sound.
+
+Which makes one rule load-bearing: **a card writes only the parameter it introduces,
+once.** Nothing re-states an earlier card's value, no chapter opens by dialling the
+previous one back to a baseline, and going Back to re-read a card does not re-stamp
+it. Drag Steps to 5 on the card that introduces Steps and it is still 5 at the end of
+the tour. Both halves are tested — a Node test walks the cards for a repeated key, and
+the browser check walks Back over a card and asserts no second write.
+
+Opening the tour does stage one thing: all channels but the first are muted and track 1
+comes on screen, so the copy is describing the arrangement it was written for. That is
+staging, not settings — every number survives it, and the Channels chapter turns the
+others back on.
+
+Two files, and the split is the point:
+
+- [`src/ui/tutorialSteps.js`](src/ui/tutorialSteps.js) — the cards, as data with no
+  imports (the same shape [`infoText.js`](src/ui/infoText.js) has, for the same
+  reasons). A card names what it points at, what it says, and what it sets.
+- [`src/ui/TutorialOverlay.js`](src/ui/TutorialOverlay.js) — walks that list. It knows
+  nothing about any particular card, and reaches the instrument only through
+  callbacks, so a card's change goes out as an ordinary `param:change` and is
+  committed by the store like any other.
+
+A card points at a control by its **`data-info` id** — the attribute every control
+already carries naming its own parameter key, which the info footer and the LFO's
+assign mode also read. So the tour needed no new markup on any control, and
+[`test/tutorialSteps.test.js`](test/tutorialSteps.test.js) holds it to ids the footer
+also describes, along with checking that every value a card demonstrates is one the
+store would actually keep.
+
+The dim is four fixed panels tiled around the target rather than one scrim with a hole
+in it — see TutorialOverlay's header for why the obvious build cannot work here, and
+[`test/browser/tutorial-check.html`](test/browser/tutorial-check.html) for the
+hit-testing that proves the target really is reachable and the rest really is not.
+
+Those panels stand down for one gesture. The LFO card tells the reader to press Map and
+click any control that lights up, and most of them are outside the hole — so
+`setAssignMode` in [`src/main.js`](src/main.js) puts `is-assigning` on the body and the
+panels stop swallowing pointer events for as long as the mapping is in flight. The dim
+itself stays.
+
 ## Deploying
 
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) publishes to GitHub

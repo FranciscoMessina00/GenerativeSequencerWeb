@@ -1,0 +1,243 @@
+<!doctype html>
+<!-- Manual check for the guided tour's overlay: the geometry, and the fact that the
+     spotlit control really is reachable while everything else really is not.
+
+     Browser-only, and unusually so. What is under test is four fixed panels tiling a
+     viewport around a measured DOMRect, and `document.elementFromPoint` answering that
+     nothing is painted over the target and something is painted over everything else.
+     None of that has a meaning outside a browser -- there are no rects to measure and
+     nothing to hit-test -- so no amount of `npm test` could reach it. The step data
+     itself is checked in Node instead, by test/tutorialSteps.test.js.
+
+     Deliberately driven with its own five-card list rather than the real tour: this is
+     a check of the machinery, and pinning it to the shipped copy would make every
+     rewording of a card a test failure. -->
+<html>
+<head><meta charset="utf-8"><link rel="stylesheet" href="../../styles/main.css">
+<style>
+body { background:#12151a; color:#dde3ea; font:13px monospace; margin:0; padding:14px; }
+#log { position:fixed; right:8px; bottom:8px; margin:0; font-size:11px; max-height:60vh; overflow:auto; }
+/* The targets, at known positions well inside the viewport so that scrollIntoView has
+   nothing to do -- a smooth scroll would still be in flight while the rects below are
+   being measured. */
+.mark { position:absolute; display:grid; place-items:center; background:#1f242c; border:1px solid #2b323c; }
+#alpha { left:60px;  top:120px; width:120px; height:40px; }
+#beta  { left:600px; top:300px; width:200px; height:60px; }
+#gamma { left:200px; top:500px; width:90px;  height:30px; }
+
+/* Nothing about the widget under test is overridden here. The panels and the ring
+   carry no transition of their own -- see the stylesheet, which explains why -- so a
+   rect read straight after a step change is the final answer rather than a frame of
+   an animation, and these checks can be synchronous. */
+</style>
+</head>
+<body>
+<div id="alpha" class="mark" data-info="alpha">alpha</div>
+<div id="beta" class="mark">beta</div>
+<div id="gamma" class="mark" data-info="gamma">gamma</div>
+<button id="opener" type="button">Open</button>
+<pre id="log"></pre>
+<script type="module">
+import { TutorialOverlay } from '../../src/ui/TutorialOverlay.js';
+
+const logEl = document.getElementById('log');
+const log = (s) => { logEl.textContent += s + '\n'; };
+let failures = 0;
+const check = (name, actual, expected) => {
+  const ok = String(actual) === String(expected);
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual}${ok ? '' : ` (expected ${expected})`}`);
+};
+/** Geometry comes back fractional; the widget rounds to whole pixels when it writes. */
+const near = (name, actual, expected, tol = 1.5) => {
+  const ok = Math.abs(actual - expected) <= tol;
+  if (!ok) failures += 1;
+  log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${actual.toFixed(1)}${ok ? '' : ` (expected ~${expected.toFixed(1)})`}`);
+};
+
+const STEPS = [
+  { id: 'intro', chapter: 'A', title: 'Intro', body: 'Points at nothing at all.' },
+  {
+    id: 'one', chapter: 'A', title: 'One', body: 'By data-info id.', target: 'alpha', set: { bpm: 96 },
+  },
+  {
+    id: 'two', chapter: 'A', title: 'Two', body: 'By selector.', selector: '#beta', track: 1, show: 1, set: { level: 0.5 },
+  },
+  {
+    id: 'three', chapter: 'B', title: 'Three', body: 'Second chapter.', target: 'gamma', play: true,
+  },
+  { id: 'missing', chapter: 'B', title: 'Missing', body: 'Selector matches nothing.', selector: '.nope' },
+];
+
+const params = [];
+const shown = [];
+let started = 0;
+let toggled = 0;
+const opener = document.getElementById('opener');
+const tutorial = new TutorialOverlay({
+  steps: STEPS,
+  setParam: (key, value, trackId) => params.push(`${key}=${value}@${trackId}`),
+  selectTrack: (t) => shown.push(t),
+  start: () => { started += 1; },
+  toggleTransport: () => { toggled += 1; },
+  anchor: opener,
+});
+
+const q = (sel) => document.querySelector(sel);
+const masks = () => [...document.querySelectorAll('.tutorial__mask')].map((el) => el.getBoundingClientRect());
+const ring = () => q('.tutorial__ring').getBoundingClientRect();
+const card = () => q('.tutorial__card').getBoundingClientRect();
+const vw = () => window.innerWidth;
+const vh = () => window.innerHeight;
+/** Which of the overlay's own pieces, if any, is painted at this point. */
+const hitClass = (x, y) => {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return 'none';
+  return el.classList.contains('tutorial__mask') ? 'mask' : (el.id || el.className || el.tagName);
+};
+
+// ---- closed to begin with ------------------------------------------------
+check('starts closed', tutorial.isOpen, false);
+check('nothing in the document yet', document.querySelectorAll('.tutorial').length, 0);
+
+// ---- card 1: nothing to point at -----------------------------------------
+tutorial.open();
+check('open', tutorial.isOpen, true);
+check('four dim panels', document.querySelectorAll('.tutorial__mask').length, 4);
+check('marked as pointing nowhere', q('.tutorial').classList.contains('tutorial--no-target'), true);
+check('chapter shown', q('.tutorial__chapter').textContent, 'A');
+check('counted', q('.tutorial__count').textContent, `1 of ${STEPS.length}`);
+check('Back is dead on the first card', q('.tutorial__back').disabled, true);
+{
+  // The whole viewport is dimmed by the first panel alone, so there is no hole to
+  // find and the card sits in the middle of it.
+  const [top] = masks();
+  near('first panel covers the width', top.width, vw());
+  near('first panel covers the height', top.height, vh());
+  const c = card();
+  near('card centred horizontally', c.left + c.width / 2, vw() / 2, 2);
+  near('card centred vertically', c.top + c.height / 2, vh() / 2, 2);
+}
+
+// ---- card 2: a data-info target ------------------------------------------
+q('.tutorial__next').click();
+check('advanced', q('.tutorial__count').textContent, `2 of ${STEPS.length}`);
+check('parameter forwarded', params.join('|'), 'bpm=96@0');
+check('no page switch asked for', shown.length, 0);
+{
+  const target = q('#alpha').getBoundingClientRect();
+  const r = ring();
+  // The hole is the target's box with 6px of air round it -- see PAD.
+  near('hole left', r.left, target.left - 6);
+  near('hole top', r.top, target.top - 6);
+  near('hole right', r.right, target.right + 6);
+  near('hole bottom', r.bottom, target.bottom + 6);
+
+  // The four panels tile the viewport around it exactly: no seam of undimmed page,
+  // and no overlap onto the target.
+  const [top, right, bottom, left] = masks();
+  near('panels span the height', top.height + r.height + bottom.height, vh());
+  near('panels span the width', left.width + r.width + right.width, vw());
+  near('side panels start at the hole', left.top, r.top);
+  near('side panels end at the hole', right.bottom, r.bottom);
+
+  // The claim the whole design rests on: nothing is painted over the target, so it
+  // is still there to be clicked, while everywhere else answers with a dim panel.
+  check('the hole reaches the target', hitClass(r.left + r.width / 2, r.top + r.height / 2), 'alpha');
+  check('the top-left corner is covered', hitClass(4, 4), 'mask');
+  check('below the hole is covered', hitClass(r.left + r.width / 2, r.bottom + 30), 'mask');
+
+  // ...and the card never sits on top of the thing it is describing.
+  const c = card();
+  const overlaps = c.left < r.right && c.right > r.left && c.top < r.bottom && c.bottom > r.top;
+  check('card clear of the hole', overlaps, false);
+}
+
+// ---- card 3: a selector, a page switch, a per-track write ----------------
+q('.tutorial__next').click();
+check('page switch asked for', shown.join(','), '1');
+check('written to the named track', params.join('|'), 'bpm=96@0|level=0.5@1');
+check('still pointing at something', q('.tutorial').classList.contains('tutorial--no-target'), false);
+{
+  const target = q('#beta').getBoundingClientRect();
+  const r = ring();
+  near('hole moved to the selector match', r.left + r.width / 2, target.left + target.width / 2);
+  check('the hole reaches it', hitClass(r.left + r.width / 2, r.top + r.height / 2), 'beta');
+}
+
+// ---- back, and forward again --------------------------------------------
+q('.tutorial__back').click();
+check('back a card', q('.tutorial__count').textContent, `2 of ${STEPS.length}`);
+// Card 1's `set` ran when the tour opened and must NOT run again here. The reader may
+// have dragged that very control since -- going back to re-read the card is not a
+// request to undo their edit. Still two writes, both from the first visits.
+check('back does not re-apply', params.join('|'), 'bpm=96@0|level=0.5@1');
+near('hole back on the first target', ring().left, q('#alpha').getBoundingClientRect().left - 6);
+
+// ---- skipping a chapter --------------------------------------------------
+q('.tutorial__skip').click();
+check('skipped to the next chapter', q('.tutorial__chapter').textContent, 'B');
+check('...at its first card', q('.tutorial__count').textContent, `4 of ${STEPS.length}`);
+// Card 4 is the one carrying `play`, and arriving on it must NOT start anything: it
+// offers the reader the choice of pressing Play themselves, and starting here would
+// answer for them before they had read the offer.
+check('arriving on the play card starts nothing', started, 0);
+check('skip hidden once there is nothing left to skip to', q('.tutorial__skip').hidden, true);
+
+// ---- a selector that matches nothing -------------------------------------
+q('.tutorial__next').click();
+check('leaving the play card keeps its promise', started, 1);
+check('last card reached', q('.tutorial__count').textContent, `5 of ${STEPS.length}`);
+check('a dead selector points nowhere rather than throwing', q('.tutorial').classList.contains('tutorial--no-target'), true);
+check('Next becomes Done', q('.tutorial__next').textContent, 'Done');
+{
+  const [top] = masks();
+  near('page uniformly dimmed again', top.height, vh());
+}
+
+// ---- the space bar reaches the transport ---------------------------------
+// The page's own space handler wants document.body to have focus, which it never has
+// while a card is up. Without the overlay carrying the key, a reader who stops the
+// transport after the Play button has gone behind the dim has no way to start it again.
+{
+  const before = toggled;
+  q('.tutorial__card').focus();
+  q('.tutorial__card').dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+  check('space with the card focused reaches the transport', toggled, before + 1);
+  q('.tutorial__next').focus();
+  q('.tutorial__next').dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+  check('...but not when a button has focus, where space presses it', toggled, before + 1);
+  q('.tutorial__card').focus();
+}
+
+// ---- Done closes, and hands focus back -----------------------------------
+q('.tutorial__next').click();
+check('closed', tutorial.isOpen, false);
+check('removed from the document', document.querySelectorAll('.tutorial').length, 0);
+check('focus returned to what opened it', document.activeElement, opener);
+
+// ---- Escape closes too ---------------------------------------------------
+tutorial.open();
+check('reopened at the first card', q('.tutorial__count').textContent, `1 of ${STEPS.length}`);
+window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+check('Escape closed it', tutorial.isOpen, false);
+
+// ---- arrows move the tour only while the card has focus ------------------
+tutorial.open(1);
+check('opened part-way through', q('.tutorial__count').textContent, `2 of ${STEPS.length}`);
+q('#alpha').focus?.();
+document.getElementById('opener').focus();
+window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+check('arrows outside the card are left alone', q('.tutorial__count').textContent, `2 of ${STEPS.length}`);
+q('.tutorial__next').focus();
+window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+check('arrows inside the card advance', q('.tutorial__count').textContent, `3 of ${STEPS.length}`);
+window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+check('...and go back', q('.tutorial__count').textContent, `2 of ${STEPS.length}`);
+tutorial.close();
+
+log(`\n${failures === 0 ? 'all checks passed' : `${failures} FAILED`}`);
+document.title = failures === 0 ? 'tutorial-check-done' : 'tutorial-check-failed';
+</script>
+</body>
+</html>

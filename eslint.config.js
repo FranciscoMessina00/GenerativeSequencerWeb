@@ -72,6 +72,11 @@ export default [
         setInterval: 'readonly',
         clearInterval: 'readonly',
         requestAnimationFrame: 'readonly',
+        // Paired with the above, as clearTimeout and clearInterval are with theirs.
+        // Only one caller so far: the tutorial overlay drops a pending relayout when
+        // it closes, so a frame scheduled by a last scroll cannot fire into a
+        // dismantled overlay.
+        cancelAnimationFrame: 'readonly',
         prompt: 'readonly',
       },
     },
